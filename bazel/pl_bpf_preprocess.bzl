@@ -49,12 +49,13 @@ def pl_bpf_preprocess(
     # applied to it, we use this hack instead.
     # For more details, see note about syshdrs above.
     syshdrs_dir = syshdrs[2:]
+    syshdrs_dir = "external/px/" + syshdrs
 
     defines_str = ""
     for d in defines:
         defines_str += "-D" + d + " "
 
-    cmd = "cpp -U linux {} -Dinclude=#include -I. -I{} $(location {}) -o $@".format(defines_str, syshdrs_dir, src)
+    cmd = "cpp -U linux {} -Dinclude=#include -I. -I{} -I{} $(location {}) -o $@".format(defines_str, "external/px", syshdrs_dir, src)
 
     native.genrule(
         name = name + "_bpf_preprocess_genrule",

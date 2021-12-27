@@ -35,9 +35,10 @@ pl_cc_library(
         ],
     ),
     visibility = [
-        "//src/e2e_test/vizier/planner/dump_schemas:__pkg__",
-        "//src/stirling:__subpackages__",
-        "//src/vizier/services/agent:__subpackages__",
+        #"//src/e2e_test/vizier/planner/dump_schemas:__pkg__",
+        #"//src/stirling:__subpackages__",
+        #"//src/vizier/services/agent:__subpackages__",
+	"//visibility:public",
     ],
     deps = [
         "//src/shared/types/typespb/wrapper:cc_library",

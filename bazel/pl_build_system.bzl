@@ -78,7 +78,7 @@ def pl_common_linkopts():
             "-Wl,--hash-style=gnu",
         ],
     }) + select({
-        "//bazel:use_libcpp": [],
+        "@px//bazel:use_libcpp": [],
         "//conditions:default": ["-lstdc++fs"],
     })
 
@@ -103,9 +103,9 @@ def _default_external_deps():
 
 def _default_internal_deps():
     return [
-        "//src/common/base:cc_library",
-        "//src/common/memory:cc_library",
-        "//src/common/perf:cc_library",
+        "@px//src/common/base:cc_library",
+        "@px//src/common/memory:cc_library",
+        "@px//src/common/perf:cc_library",
     ]
 
 # PL C++ library targets should be specified with this function.
@@ -279,8 +279,8 @@ def pl_cc_mock(name, **kargs):
 # Dependencies on tcmalloc_and_profiler should be wrapped with this function.
 def tcmalloc_external_dep(repository):
     return select({
-        repository + "//bazel:disable_tcmalloc": None,
-        "//conditions:default": "//third_party:gperftools",
+        repository + "@px//bazel:disable_tcmalloc": None,
+        "//conditions:default": "@px//third_party:gperftools",
     })
 
 # As above, but wrapped in list form for adding to dep lists. This smell seems needed as
@@ -288,8 +288,8 @@ def tcmalloc_external_dep(repository):
 # https://github.com/bazelbuild/bazel/issues/2273.
 def tcmalloc_external_deps(repository):
     return select({
-        repository + "//bazel:disable_tcmalloc": [],
-        "//conditions:default": ["//third_party:gperftools"],
+        repository + "@px//bazel:disable_tcmalloc": [],
+        "//conditions:default": ["@px//third_party:gperftools"],
     })
 
 def pl_cgo_library(**kwargs):
