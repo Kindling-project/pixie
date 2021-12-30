@@ -52,8 +52,8 @@ ConnInfoMapManager::ConnInfoMapManager(bpf_tools::BCCWrapper* bcc)
   std::filesystem::path self_path = GetSelfPath().ValueOrDie();
 
   bpf_tools::UProbeSpec uprobe{.binary_path = self_path,
-                               .symbol = {},  // Keep GCC happy.
-                               .address = symbol_addr,
+                               .symbol = "ConnInfoMapCleanupTrigger",  // Keep GCC happy.
+                               // .address = symbol_addr,
                                .attach_type = bpf_tools::BPFProbeAttachType::kEntry,
                                .probe_fn = "conn_cleanup_uprobe"};
 
