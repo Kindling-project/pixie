@@ -47,13 +47,14 @@ ConnInfoMapManager::ConnInfoMapManager(bpf_tools::BCCWrapper* bcc)
       conn_disabled_map_(bcc->GetHashTable<uint64_t, uint64_t>("conn_disabled_map")) {
   // Use address instead of symbol to specify this probe,
   // so that even if debug symbols are stripped, the uprobe can still attach.
-  // uint64_t symbol_addr = reinterpret_cast<uint64_t>(&ConnInfoMapCleanupTrigger);
+  uint64_t symbol_addr = reinterpret_cast<uint64_t>(&ConnInfoMapCleanupTrigger);
 
   std::filesystem::path self_path = GetSelfPath().ValueOrDie();
 
   bpf_tools::UProbeSpec uprobe{.binary_path = self_path,
-                               .symbol = "ConnInfoMapCleanupTrigger",  // Keep GCC happy.
-                               // .address = symbol_addr,
+                               //.symbol = "ConnInfoMapCleanupTrigger",  // Keep GCC happy.
+			       .symbol = {},
+                               .address = symbol_addr,
                                .attach_type = bpf_tools::BPFProbeAttachType::kEntry,
                                .probe_fn = "conn_cleanup_uprobe"};
 
