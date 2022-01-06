@@ -45,8 +45,14 @@ def base_images():
         "openresty/openresty",
     )
 
+    container_pull(
+        name = "base_image",
+	digest = "sha256:e7d88de73db3d3fd9b2d63aa7f447a10fd0220b7cbf39803c803f2af9ba256b3",
+        registry = "registry.us-west-1.aliyuncs.com",
+        repository = "arms-docker-repo/arms-bpf-agent",
+    )
     _gcr_io_image(
-        "base_image",
+        "base_image_old",
         "sha256:e37cf3289c1332c5123cbf419a1657c8dad0811f2f8572433b668e13747718f8",
         "distroless/base",
     )
