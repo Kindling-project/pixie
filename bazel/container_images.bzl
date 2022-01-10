@@ -47,7 +47,7 @@ def base_images():
 
     container_pull(
         name = "base_image",
-	digest = "sha256:568368420da8d571b0afddd67e1b2ecd90653aea25a3f8257b3c1e43eb28f53a",
+	digest = "sha256:fbd635a3df6ab171e69ce89be109f576174f5666defa4fcfbbfe46b65a8d04b7",
         registry = "registry.us-west-1.aliyuncs.com",
         repository = "arms-docker-repo/arms-bpf-agent",
     )
