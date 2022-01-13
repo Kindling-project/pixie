@@ -56,12 +56,15 @@ void SourceConnector::TransferData(ConnectorContext* ctx,
 
 void SourceConnector::PushData(DataPushCallback agent_callback,
                                const std::vector<DataTable*>& data_tables) {
+  LOG(WARNING) << absl::Substitute("[SourceConnector][PushData] entering push data");
   for (auto* data_table : data_tables) {
     auto record_batches = data_table->ConsumeRecords();
     for (auto& record_batch : record_batches) {
       if (record_batch.records.empty()) {
+	      LOG(WARNING) << absl::Substitute("[SourceConnector][PushData] data_table id is $0, records batch is empty, skip.", data_table->id());
         continue;
       }
+      LOG(WARNING) << absl::Substitute("[SourceConnector][PushData] data_table id is $0, begin to real push data by using agent callback", data_table->id());
       Status s = agent_callback(
           data_table->id(), record_batch.tablet_id,
           std::make_unique<types::ColumnWrapperRecordBatch>(std::move(record_batch.records)));
