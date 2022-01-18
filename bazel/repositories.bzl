@@ -133,7 +133,7 @@ def _cc_deps():
 
     # Remove the pull and push directory since they depends on civet and we don't
     # want to pull in the dependency for now.
-    _bazel_repo("com_github_jupp0r_prometheus_cpp", patch_cmds = ["rm -rf pull push 3rdparty"])
+    _bazel_repo("com_github_jupp0r_prometheus_cpp")
 
     # Dependencies where we provide an external BUILD file.
     _bazel_repo("com_github_apache_arrow", build_file = "@px//bazel/external:arrow.BUILD")
