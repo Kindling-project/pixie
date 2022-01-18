@@ -286,9 +286,9 @@ REPOSITORY_LOCATIONS = dict(
         sha256 = "f1004a49f40d7acb43e86b1fd95f73e80c778acb163e309bba86f0cbd7fa8a71",
     ),
     com_github_jupp0r_prometheus_cpp = dict(
-        urls = ["https://github.com/jupp0r/prometheus-cpp/archive/refs/tags/v0.13.0.tar.gz"],
-        strip_prefix = "prometheus-cpp-0.13.0",
-        sha256 = "5319b77d6dc73af34bc256e7b18a7e0da50c787ef6f9e32785d045428b6473cc",
+        urls = ["https://github.com/jupp0r/prometheus-cpp/archive/refs/tags/v1.0.0.tar.gz"],
+        strip_prefix = "prometheus-cpp-1.0.0",
+        sha256 = "07018db604ea3e61f5078583e87c80932ea10c300d979061490ee1b7dc8e3a41",
     ),
     com_github_USCiLab_cereal = dict(
         urls = ["https://github.com/USCiLab/cereal/archive/refs/tags/v1.3.1.tar.gz"],
