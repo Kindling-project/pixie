@@ -542,7 +542,10 @@ void SocketTraceConnector::UpdateCommonState(ConnectorContext* ctx) {
   // so raw data will be pushed to connection trackers more aggressively.
   // No data is lost, but this is a side-effect of sorts that affects timing of transfers.
   // It may be worth noting during debug.
+  int64_t start_ts = CurrentTimeNS();
   PollPerfBuffers();
+  int64_t end_ts = CurrentTimeNS();
+  this->poll_buffers_duration.Add({{"stage","update_common_state"},{"type","total"}}, prometheus::Histogram::BucketBoundaries{10,20,30,40,50,60,70,80,90,100}).Observe((end_ts * 1.0 - start_ts * 1.0) / 1000000);
 
   // Set-up current state for connection inference purposes.
   if (socket_info_mgr_ != nullptr) {
@@ -713,10 +716,13 @@ void SocketTraceConnector::HandleDataEvent(void* cb_cookie, void* data, int data
   if (filler_event_ptr) {
     connector->AcceptDataEvent(std::move(filler_event_ptr));
   }
+  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
+  connector->AcceptDataEvent(std::move(data_event_ptr));
 }
 
 void SocketTraceConnector::HandleDataEventLoss(void* cb_cookie, uint64_t lost) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
+  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
   static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossSocketDataEvent,
                                                                   lost);
 }
@@ -724,11 +730,13 @@ void SocketTraceConnector::HandleDataEventLoss(void* cb_cookie, uint64_t lost) {
 void SocketTraceConnector::HandleControlEvent(void* cb_cookie, void* data, int /*data_size*/) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
   auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
+  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","control_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
   connector->AcceptControlEvent(*static_cast<const socket_control_event_t*>(data));
 }
 
 void SocketTraceConnector::HandleControlEventLoss(void* cb_cookie, uint64_t lost) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
+  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","control_event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
   static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossSocketControlEvent,
                                                                   lost);
 }
@@ -736,11 +744,13 @@ void SocketTraceConnector::HandleControlEventLoss(void* cb_cookie, uint64_t lost
 void SocketTraceConnector::HandleConnStatsEvent(void* cb_cookie, void* data, int /*data_size*/) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
   auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
+  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","conn_stats_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
   connector->AcceptConnStatsEvent(*static_cast<const conn_stats_event_t*>(data));
 }
 
 void SocketTraceConnector::HandleConnStatsEventLoss(void* cb_cookie, uint64_t lost) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
+  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","conn_stats_event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
   static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossConnStatsEvent,
                                                                   lost);
 }
@@ -748,11 +758,13 @@ void SocketTraceConnector::HandleConnStatsEventLoss(void* cb_cookie, uint64_t lo
 void SocketTraceConnector::HandleMMapEvent(void* cb_cookie, void* data, int /*data_size*/) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
   auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
+  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","mmap_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
   connector->uprobe_mgr_.NotifyMMapEvent(*static_cast<upid_t*>(data));
 }
 
 void SocketTraceConnector::HandleMMapEventLoss(void* cb_cookie, uint64_t lost) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
+  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","mmap_event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
   static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossMMapEvent, lost);
 }
 
@@ -778,6 +790,7 @@ void SocketTraceConnector::HandleHTTP2Event(void* cb_cookie, void* data, int /*d
           event->attr.conn_id.tsid, event->attr.stream_id, event->attr.end_stream, event->name,
           event->value);
       connector->AcceptHTTP2Header(std::move(event));
+      connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","header_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
     } break;
     case kDataFrameEventRead:
     case kDataFrameEventWrite: {
@@ -789,16 +802,19 @@ void SocketTraceConnector::HandleHTTP2Event(void* cb_cookie, void* data, int /*d
           magic_enum::enum_name(event->attr.event_type), event->attr.conn_id.fd,
           event->attr.conn_id.tsid, event->attr.stream_id, event->attr.end_stream, event->payload);
       connector->AcceptHTTP2Data(std::move(event));
+      connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
     } break;
     default:
       LOG(DFATAL) << absl::Substitute("Unexpected event_type $0",
                                       magic_enum::enum_name(event_type));
+      connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","unexpected"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
   }
 }
 
 void SocketTraceConnector::HandleHTTP2EventLoss(void* cb_cookie, uint64_t lost) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
   static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossHTTP2Event, lost);
+  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
 }
 
 //-----------------------------------------------------------------------------

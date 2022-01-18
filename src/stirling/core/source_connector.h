@@ -120,7 +120,17 @@ class SourceConnector : public NotCopyable {
  protected:
   explicit SourceConnector(std::string_view source_name,
                            const ArrayView<DataTableSchema>& table_schemas)
-      : source_name_(source_name), table_schemas_(table_schemas) {}
+      :event_counter(prometheus::BuildCounter()
+          .Name("nami_events_total").Help("Total bytes in the table")
+          .Register(GetMetricsRegistry()),
+//          .Add({{"source_name", source_name}})),
+        poll_buffers_duration(prometheus::BuildHistogram()
+          .Name("nami_poll_buffer_duration_seconds")
+          .Help("Poll perf buffer duration seconds")
+          .Register(GetMetricsRegistry()),
+//          .Add({{"source_name",source_name}}),
+      source_name_(source_name),
+      table_schemas_(table_schemas){}
 
   virtual Status InitImpl() = 0;
 
@@ -152,6 +162,10 @@ class SourceConnector : public NotCopyable {
   // Debug members.
   int debug_level_ = 0;
   absl::flat_hash_set<int> pids_to_trace_;
+
+  // metrics
+  prometheus::Counter& event_counter;
+  prometheus::Histogram& poll_buffers_duration;
 
  private:
   std::atomic<State> state_ = State::kUninitialized;
