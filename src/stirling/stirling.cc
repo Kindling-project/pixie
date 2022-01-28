@@ -782,7 +782,6 @@ void StirlingImpl::RunCore() {
     // TODO(oazizi): If context constructor does a lot of work (e.g. ListUPIDs()),
     //               then there might be an inefficiency here, since we don't know if
     //               mgr->SamplingRequired() will be true for any manager.
-    LOG(INFO) << "[stirling] begin to getcontext ...";
     std::unique_ptr<ConnectorContext> ctx = GetContext();
 
     {
@@ -791,7 +790,6 @@ void StirlingImpl::RunCore() {
       absl::base_internal::SpinLockHolder lock(&info_class_mgrs_lock_);
 
       // Run through every SourceConnector and InfoClassManager being managed.
-      LOG(INFO) << absl::Substitute("[stirling] begin to iterate source_output_maps_ ... ");
       for (auto& [source, output] : source_output_map_) {
         // Phase 1: Probe each source for its data.
         if (source->sampling_freq_mgr().Expired()) {
@@ -799,7 +797,6 @@ void StirlingImpl::RunCore() {
         }
         // Phase 2: Push Data upstream.
         if (source->push_freq_mgr().Expired() || DataExceedsThreshold(output.data_tables)) {
-	  LOG(INFO) << "[stirling] begin to call agent data push callback ...";
           source->PushData(data_push_callback_, output.data_tables);
         }
       }
