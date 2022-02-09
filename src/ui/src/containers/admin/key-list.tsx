@@ -22,78 +22,47 @@ import {
   DeleteForeverOutlined as DeleteIcon,
   CopyAllOutlined as CopyIcon,
 } from '@mui/icons-material';
-import {
-  IconButton,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-} from '@mui/material';
+import { IconButton } from '@mui/material';
 import { Theme } from '@mui/material/styles';
-import { createStyles, makeStyles, withStyles } from '@mui/styles';
+import { createStyles, makeStyles } from '@mui/styles';
 
 export const useKeyListStyles = makeStyles((theme: Theme) => createStyles({
   keyValue: {
     padding: 0,
     fontWeight: theme.typography.fontWeightLight,
-    fontSize: '14px',
+    fontSize: theme.typography.body2.fontSize,
     color: theme.palette.foreground.one,
-    borderWidth: 8,
+    borderWidth: theme.spacing(1),
     borderColor: theme.palette.background.default,
   },
   actionsButton: {
-    padding: 6,
+    padding: theme.spacing(0.75),
   },
   copyBtn: {
-    minWidth: '30px',
+    minWidth: theme.spacing(3.75),
   },
   error: {
     padding: theme.spacing(1),
   },
 }), { name: 'KeyList' });
 
-// eslint-disable-next-line react-memo/require-memo
-export const KeyListItemIcon = withStyles(() => createStyles({
-  root: {
-    minWidth: 30,
-    marginRight: 5,
-  },
-}))(ListItemIcon);
-
-// eslint-disable-next-line react-memo/require-memo
-export const KeyListItemText = withStyles((theme: Theme) => createStyles({
-  primary: {
-    fontWeight: theme.typography.fontWeightLight,
-    fontSize: '14px',
-    color: theme.palette.foreground.one,
-  },
-}))(ListItemText);
-
-// eslint-disable-next-line react-memo/require-memo
-export const KeyListMenu = withStyles((theme: Theme) => createStyles({
-  paper: {
-    borderWidth: 8,
-    borderColor: theme.palette.background.default,
-  },
-}))(Menu);
-
-const useCopyDeleteStyles = makeStyles(() => createStyles({
-  button: {
-    padding: 6,
-  },
-}));
-
-// eslint-disable-next-line react-memo/require-memo
-export const KeyActionButtons = ({
+export const KeyActionButtons: React.FC<{
+  deleteOnClick: () => void;
+  copyOnClick: () => void;
+  // eslint-disable-next-line react-memo/require-memo
+}> = ({
   deleteOnClick, copyOnClick,
-}: { deleteOnClick: any, copyOnClick: any }): React.ReactElement => {
-  const classes = useCopyDeleteStyles();
-  return (<>
-    <IconButton onClick={copyOnClick} className={classes.button}>
-      <CopyIcon />
-    </IconButton>
-    <IconButton onClick={deleteOnClick} className={classes.button}>
-      <DeleteIcon />
-    </IconButton>
-  </>);
+}) => {
+  const classes = useKeyListStyles();
+  return (
+    <>
+      <IconButton onClick={copyOnClick} className={classes.actionsButton}>
+        <CopyIcon />
+      </IconButton>
+      <IconButton onClick={deleteOnClick} className={classes.actionsButton}>
+        <DeleteIcon />
+      </IconButton>
+    </>
+  );
 };
 KeyActionButtons.displayName = 'KeyActionButtons';

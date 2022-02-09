@@ -268,7 +268,7 @@ class ConnTracker : NotCopyMoveable {
 
     UpdateResultStats(result);
 
-    return result.records;
+    return std::move(result.records);
   }
 
   /**
@@ -511,27 +511,30 @@ class ConnTracker : NotCopyMoveable {
   }
 
   template <typename TProtocolTraits>
-  void Cleanup(size_t size_limit_bytes,
-               std::chrono::time_point<std::chrono::steady_clock> expiry_timestamp) {
+  void Cleanup(size_t frame_size_limit_bytes, size_t buffer_size_limit_bytes,
+               std::chrono::time_point<std::chrono::steady_clock> frame_expiry_timestamp,
+               std::chrono::time_point<std::chrono::steady_clock> buffer_expiry_timestamp) {
     using TFrameType = typename TProtocolTraits::frame_type;
     using TStateType = typename TProtocolTraits::state_type;
 
+    InitFrames<TFrameType>();
+
     if constexpr (std::is_same_v<TFrameType, protocols::http2::Stream>) {
-      http2_client_streams_.Cleanup(size_limit_bytes, expiry_timestamp);
-      http2_server_streams_.Cleanup(size_limit_bytes, expiry_timestamp);
+      http2_client_streams_.Cleanup(frame_size_limit_bytes, frame_expiry_timestamp);
+      http2_server_streams_.Cleanup(frame_size_limit_bytes, frame_expiry_timestamp);
     } else {
-      send_data_.CleanupFrames<TFrameType>(size_limit_bytes, expiry_timestamp);
-      recv_data_.CleanupFrames<TFrameType>(size_limit_bytes, expiry_timestamp);
+      send_data_.CleanupFrames<TFrameType>(frame_size_limit_bytes, frame_expiry_timestamp);
+      recv_data_.CleanupFrames<TFrameType>(frame_size_limit_bytes, frame_expiry_timestamp);
     }
 
     auto* state = protocol_state<TStateType>();
-    if (send_data_.CleanupEvents()) {
+    if (send_data_.CleanupEvents(buffer_size_limit_bytes, buffer_expiry_timestamp)) {
       if (state != nullptr) {
         state->global = {};
         state->send = {};
       }
     }
-    if (recv_data_.CleanupEvents()) {
+    if (recv_data_.CleanupEvents(buffer_size_limit_bytes, buffer_expiry_timestamp)) {
       if (state != nullptr) {
         state->global = {};
         state->recv = {};
@@ -559,6 +562,14 @@ class ConnTracker : NotCopyMoveable {
   void SetDebugTrace(int level) { debug_trace_level_ = level; }
 
   std::string ToString() const;
+
+  template <typename TFrameType>
+  void InitFrames() {
+    if constexpr (!std::is_same_v<TFrameType, protocols::http2::Stream>) {
+      send_data_.InitFrames<TFrameType>();
+      recv_data_.InitFrames<TFrameType>();
+    }
+  }
 
  private:
   /**
@@ -706,6 +717,8 @@ class ConnTracker : NotCopyMoveable {
 
 // Explicit template specialization must be declared in namespace scope.
 // See https://en.cppreference.com/w/cpp/language/member_template
+// This cannot be declared or defined inside class ConnTracker. Clang does not enforce this, but
+// GCC does. Since we use GCC for coverage build, we have to follow this rule.
 template <>
 std::vector<protocols::http2::Record>
 ConnTracker::ProcessToRecords<protocols::http2::ProtocolTraits>();
@@ -720,13 +733,13 @@ std::string DebugString(const ConnTracker& c, std::string_view prefix) {
   info += absl::Substitute("$0remote_addr=$1:$2\n", prefix, c.remote_endpoint().AddrStr(),
                            c.remote_endpoint().port());
   info += absl::Substitute("$0protocol=$1\n", prefix, magic_enum::enum_name(c.protocol()));
-  info += absl::Substitute("$0recv queue\n", prefix);
-  info += absl::Substitute("$0send queue\n", prefix);
   if constexpr (std::is_same_v<TFrameType, protocols::http2::Stream>) {
     info += c.http2_client_streams_.DebugString(absl::StrCat(prefix, "  "));
     info += c.http2_server_streams_.DebugString(absl::StrCat(prefix, "  "));
   } else {
+    info += absl::Substitute("$0recv queue\n", prefix);
     info += DebugString<TFrameType>(c.recv_data(), absl::StrCat(prefix, "  "));
+    info += absl::Substitute("$0send queue\n", prefix);
     info += DebugString<TFrameType>(c.send_data(), absl::StrCat(prefix, "  "));
   }
 

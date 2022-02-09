@@ -22,7 +22,7 @@
 
 #include <absl/container/flat_hash_map.h>
 
-#include "src/stirling/source_connectors/perf_profiler/types.h"
+#include "src/stirling/source_connectors/perf_profiler/shared/types.h"
 
 namespace px {
 namespace stirling {
@@ -46,12 +46,12 @@ namespace stirling {
 // the UI will aggregate the identical stack traces for us in the visualization.
 class StackTraceIDCache {
  public:
-  uint64_t Lookup(const SymbolicStackTrace& stack_trace);
+  uint64_t Lookup(const profiler::SymbolicStackTrace& stack_trace);
   void AgeTick();
 
  private:
-  absl::flat_hash_map<SymbolicStackTrace, uint64_t> stack_trace_ids_;
-  absl::flat_hash_map<SymbolicStackTrace, uint64_t> prev_stack_trace_ids_;
+  absl::flat_hash_map<profiler::SymbolicStackTrace, uint64_t> stack_trace_ids_;
+  absl::flat_hash_map<profiler::SymbolicStackTrace, uint64_t> prev_stack_trace_ids_;
 
   // Tracks the next stack-trace-id to be assigned;
   // incremented by 1 for each such assignment.

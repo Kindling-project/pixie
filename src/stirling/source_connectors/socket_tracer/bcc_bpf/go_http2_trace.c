@@ -27,7 +27,7 @@
 #include "src/stirling/source_connectors/socket_tracer/bcc_bpf_intf/go_grpc_types.h"
 #include "src/stirling/source_connectors/socket_tracer/bcc_bpf_intf/symaddrs.h"
 
-#define MAX_HEADER_COUNT 60
+#define MAX_HEADER_COUNT 59
 
 BPF_PERF_OUTPUT(go_grpc_header_events);
 BPF_PERF_OUTPUT(go_grpc_data_events);
@@ -38,6 +38,12 @@ BPF_PERCPU_ARRAY(data_event_buffer_heap, struct go_grpc_data_event_t, 1);
 static __inline struct go_grpc_data_event_t* get_data_event() {
   uint32_t kZero = 0;
   return data_event_buffer_heap.lookup(&kZero);
+}
+
+BPF_PERCPU_ARRAY(header_event_buffer_heap, struct go_grpc_http2_header_event_t, 1);
+static __inline struct go_grpc_http2_header_event_t* get_header_event() {
+  uint32_t kZero = 0;
+  return header_event_buffer_heap.lookup(&kZero);
 }
 
 // Maps that communicates the location of symbols within a binary.
@@ -195,50 +201,62 @@ static __inline void submit_headers(struct pt_regs* ctx, enum http2_probe_type_t
     return;
   }
 
-  struct go_grpc_http2_header_event_t event = {};
-  event.attr.probe_type = probe_type;
-  event.attr.type = type;
-  event.attr.timestamp_ns = bpf_ktime_get_ns();
-  event.attr.conn_id = conn_info->conn_id;
-  event.attr.stream_id = stream_id;
+  struct go_grpc_http2_header_event_t* event = get_header_event();
+  if (event == NULL) {
+    return;
+  }
+
+  event->attr.probe_type = probe_type;
+  event->attr.type = type;
+  event->attr.timestamp_ns = bpf_ktime_get_ns();
+  event->attr.conn_id = conn_info->conn_id;
+  event->attr.stream_id = stream_id;
+  event->attr.end_stream = false;
 
   // TODO(oazizi): Replace this constant with information from DWARF.
   const int kSizeOfHeaderField = 40;
 #pragma unroll
   for (unsigned int i = 0; i < MAX_HEADER_COUNT; ++i) {
     if (i < fields_len) {
-      fill_header_field(&event, fields_ptr + i * kSizeOfHeaderField, symaddrs);
-      go_grpc_header_events.perf_submit(ctx, &event, sizeof(event));
+      fill_header_field(event, fields_ptr + i * kSizeOfHeaderField, symaddrs);
+      go_grpc_header_events.perf_submit(ctx, event, sizeof(*event));
     }
   }
 
   // If end of stream, send one extra empty header with end-stream flag set.
   if (end_stream) {
-    event.name.size = 0;
-    event.value.size = 0;
-    event.attr.end_stream = true;
-    go_grpc_header_events.perf_submit(ctx, &event, sizeof(event));
+    event->name.size = 0;
+    event->value.size = 0;
+    event->attr.end_stream = true;
+    go_grpc_header_events.perf_submit(ctx, event, sizeof(*event));
   }
 }
 
 static __inline void submit_header(struct pt_regs* ctx, enum http2_probe_type_t probe_type,
                                    enum HeaderEventType type, void* encoder_ptr,
-                                   const void* header_field_ptr,
+                                   struct gostring* name_ptr, struct gostring* value_ptr,
                                    const struct go_http2_symaddrs_t* symaddrs) {
   struct header_attr_t* attr = active_write_headers_frame_map.lookup(&encoder_ptr);
   if (attr == NULL) {
     return;
   }
 
-  struct go_grpc_http2_header_event_t event = {};
-  event.attr.probe_type = probe_type;
-  event.attr.type = type;
-  event.attr.timestamp_ns = bpf_ktime_get_ns();
-  event.attr.conn_id = attr->conn_id;
-  event.attr.stream_id = attr->stream_id;
+  struct go_grpc_http2_header_event_t* event = get_header_event();
+  if (event == NULL) {
+    return;
+  }
 
-  fill_header_field(&event, header_field_ptr, symaddrs);
-  go_grpc_header_events.perf_submit(ctx, &event, sizeof(event));
+  event->attr.probe_type = probe_type;
+  event->attr.type = type;
+  event->attr.timestamp_ns = bpf_ktime_get_ns();
+  event->attr.conn_id = attr->conn_id;
+  event->attr.stream_id = attr->stream_id;
+  event->attr.end_stream = false;
+
+  copy_header_field(&event->name, name_ptr);
+  copy_header_field(&event->value, value_ptr);
+
+  go_grpc_header_events.perf_submit(ctx, event, sizeof(*event));
 }
 
 // TODO(oazizi): Remove this struct; Use DWARF instead.
@@ -631,7 +649,8 @@ int probe_hpack_header_encoder(struct pt_regs* ctx) {
 
   // Required argument offsets.
   REQUIRE_LOCATION(symaddrs->WriteField_e_loc, 0);
-  REQUIRE_LOCATION(symaddrs->WriteField_f_loc, 0);
+  REQUIRE_LOCATION(symaddrs->WriteField_f_name_loc, 0);
+  REQUIRE_LOCATION(symaddrs->WriteField_f_value_loc, 0);
 
   // ---------------------------------------------
   // Extract arguments (on stack)
@@ -646,13 +665,17 @@ int probe_hpack_header_encoder(struct pt_regs* ctx) {
   void* encoder_ptr = NULL;
   assign_arg(&encoder_ptr, sizeof(encoder_ptr), symaddrs->WriteField_e_loc, sp, regs);
 
-  const void* header_field_ptr = (const void*)ctx->sp + symaddrs->WriteField_f_loc.offset;
+  struct gostring name = {};
+  assign_arg(&name, sizeof(struct gostring), symaddrs->WriteField_f_name_loc, sp, regs);
+
+  struct gostring value = {};
+  assign_arg(&value, sizeof(struct gostring), symaddrs->WriteField_f_value_loc, sp, regs);
 
   // ------------------------------------------------------
   // Process
   // ------------------------------------------------------
 
-  submit_header(ctx, k_probe_hpack_header_encoder, kHeaderEventWrite, encoder_ptr, header_field_ptr,
+  submit_header(ctx, k_probe_hpack_header_encoder, kHeaderEventWrite, encoder_ptr, &name, &value,
                 symaddrs);
 
   return 0;
@@ -755,16 +778,21 @@ int probe_http_http2writeResHeaders_write_frame(struct pt_regs* ctx) {
   // TODO(oazizi): Content beyond this point needs to move to return probe of the same function.
 
   if (end_stream) {
-    struct go_grpc_http2_header_event_t event = {};
-    event.attr.probe_type = k_probe_http_http2writeResHeaders_write_frame;
-    event.attr.type = kHeaderEventWrite;
-    event.attr.timestamp_ns = bpf_ktime_get_ns();
-    event.attr.conn_id = conn_info->conn_id;
-    event.attr.stream_id = stream_id;
-    event.name.size = 0;
-    event.value.size = 0;
-    event.attr.end_stream = true;
-    go_grpc_header_events.perf_submit(ctx, &event, sizeof(event));
+    struct go_grpc_http2_header_event_t* event = get_header_event();
+    if (event == NULL) {
+      return 0;
+    }
+
+    event->attr.probe_type = k_probe_http_http2writeResHeaders_write_frame;
+    event->attr.type = kHeaderEventWrite;
+    event->attr.timestamp_ns = bpf_ktime_get_ns();
+    event->attr.conn_id = conn_info->conn_id;
+    event->attr.stream_id = stream_id;
+    event->name.size = 0;
+    event->value.size = 0;
+    event->attr.end_stream = true;
+
+    go_grpc_header_events.perf_submit(ctx, event, sizeof(*event));
   }
 
   // TODO(oazizi): We are leaking BPF map entries until this line is activated,

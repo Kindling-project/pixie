@@ -13,6 +13,7 @@ spec:
     metadata:
       labels:
         name: indexer-server
+        monitoring.gke.io/scrape: 'true'
       annotations:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '51800'
@@ -23,6 +24,9 @@ spec:
         image: gcr.io/pixie-oss/pixie-dev/cloud/indexer_server_image
         ports:
         - containerPort: 51800
+          name: http2
+        - containerPort: 51801
+          name: metrics-http
         readinessProbe:
           httpGet:
             scheme: HTTPS

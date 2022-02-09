@@ -28,8 +28,12 @@
 #include "src/stirling/source_connectors/socket_tracer/protocols/common/data_stream_buffer.h"
 #include "src/stirling/source_connectors/socket_tracer/protocols/types.h"
 
-DECLARE_uint32(datastream_buffer_retention_size);
 DECLARE_uint32(datastream_buffer_spike_size);
+DECLARE_uint32(datastream_buffer_max_gap_size);
+DECLARE_uint32(datastream_buffer_allow_before_gap_size);
+
+DECLARE_uint32(buffer_resync_duration_secs);
+DECLARE_uint32(buffer_expiration_duration_secs);
 
 namespace px {
 namespace stirling {
@@ -47,8 +51,9 @@ class DataStream : NotCopyMoveable {
  public:
   // Make the underlying raw buffer size limit the same as the parsed frames byte limit.
   DataStream(uint32_t spike_capacity = FLAGS_datastream_buffer_spike_size,
-             uint32_t retention_capacity = FLAGS_datastream_buffer_retention_size)
-      : data_buffer_(spike_capacity), retention_capacity_(retention_capacity) {}
+             uint32_t max_gap_size = FLAGS_datastream_buffer_max_gap_size,
+             uint32_t allow_before_gap_size = FLAGS_datastream_buffer_allow_before_gap_size)
+      : data_buffer_(spike_capacity, max_gap_size, allow_before_gap_size) {}
 
   /**
    * Adds a raw (unparsed) chunk of data into the stream.
@@ -65,12 +70,10 @@ class DataStream : NotCopyMoveable {
   void ProcessBytesToFrames(message_type_t type, TStateType* state);
 
   /**
-   * Returns the current set of parsed frames.
-   * @tparam TFrameType The parsed frame type within the deque.
-   * @return deque of frames.
+   * Initialize the frames to the requested frame type.
    */
   template <typename TFrameType>
-  std::deque<TFrameType>& Frames() {
+  void InitFrames() {
     DCHECK(std::holds_alternative<std::monostate>(frames_) ||
            std::holds_alternative<std::deque<TFrameType>>(frames_))
         << absl::Substitute(
@@ -84,6 +87,18 @@ class DataStream : NotCopyMoveable {
           << absl::Substitute("valueless_by_exception() triggered by initializing to type: $0",
                               typeid(TFrameType).name());
     }
+  }
+
+  /**
+   * Returns the current set of parsed frames.
+   * @tparam TFrameType The parsed frame type within the deque.
+   * @return deque of frames.
+   */
+  template <typename TFrameType>
+  std::deque<TFrameType>& Frames() {
+    // As a safety net, make sure the frames have been initialized.
+    InitFrames<TFrameType>();
+
     LOG_IF(ERROR, frames_.valueless_by_exception()) << absl::Substitute(
         "valueless_by_exception() triggered by type: $0", typeid(TFrameType).name());
     return std::get<std::deque<TFrameType>>(frames_);
@@ -111,7 +126,7 @@ class DataStream : NotCopyMoveable {
   }
 
   /**
-   * Clears all unparsed and parsed data from the Datastream.
+   * Clears all the data in the data buffer;
    */
   void Reset();
 
@@ -126,19 +141,24 @@ class DataStream : NotCopyMoveable {
   }
 
   /**
-   * Checks if the DataStream is in a Stuck state, which means that it has
-   * raw events with no missing events, but that it cannot parse anything.
-   *
-   * @return true if DataStream is stuck.
+   * If buffer has not been successfully processed in the past kSyncTimeout duration,
+   * run ParseFrames() with a search for a new message boundary.
+   * A long stuck time implies there is something unparsable at the head. It is neither returning
+   * ParseState::kInvalid nor ParseState::kSuccess, but instead is returning
+   * ParseState::kNeedsMoreData.
+   * @return true if a resync will be performed in the next ParseFrames().
    */
-  bool IsStuck() const {
-    constexpr int kMaxStuckCount = 3;
-    return stuck_count_ > kMaxStuckCount;
+  bool IsSyncRequired() const {
+    const auto kSyncTimeout = std::chrono::seconds(FLAGS_buffer_resync_duration_secs);
+
+    return (std::chrono::steady_clock::now() - last_progress_time_) >= kSyncTimeout;
   }
 
   int stat_invalid_frames() const { return stat_invalid_frames_; }
   int stat_valid_frames() const { return stat_valid_frames_; }
   int stat_raw_data_gaps() const { return stat_raw_data_gaps_; }
+
+  void ResetLastProgressTimeToNow() { last_progress_time_ = std::chrono::steady_clock::now(); }
 
   /**
    * Fraction of frame parsing attempts that resulted in an invalid frame.
@@ -188,12 +208,18 @@ class DataStream : NotCopyMoveable {
   /**
    * Cleanup BPF events that are not able to be be processed.
    */
-  bool CleanupEvents() {
-    if (IsStuck()) {
-      // We are assuming that when this stream is stuck, the messages previously parsed are unlikely
-      // to be useful, as they are even older than the events being purged now.
-      Reset();
+  bool CleanupEvents(size_t size_limit_bytes,
+                     std::chrono::time_point<std::chrono::steady_clock> expiry_timestamp) {
+    // We are assuming that when this stream is stuck, we clear the data buffer.
+    if (last_progress_time_ < expiry_timestamp) {
+      data_buffer_.Reset();
+      has_new_events_ = false;
+      ResetLastProgressTimeToNow();
       return true;
+    }
+
+    if (data_buffer_.size() > size_limit_bytes) {
+      data_buffer_.RemovePrefix(data_buffer_.size() - size_limit_bytes);
     }
 
     return false;
@@ -223,8 +249,6 @@ class DataStream : NotCopyMoveable {
   // Raw data events from BPF.
   protocols::DataStreamBuffer data_buffer_;
 
-  uint32_t retention_capacity_ = 0;
-
   // Vector of parsed HTTP/MySQL messages.
   // Once parsed, the raw data events should be discarded.
   // std::variant adds 8 bytes of overhead (to 80->88 for deque)
@@ -242,11 +266,9 @@ class DataStream : NotCopyMoveable {
   // changed.
   bool has_new_events_ = false;
 
-  // Number of consecutive calls to ProcessToRecords(), where there are a non-zero number of events,
-  // but no parsed messages are produced.
-  // Note: unlike the monotonic stats below, this resets when the stuck condition is cleared.
-  // Thus it is a state, not a statistic.
-  int stuck_count_ = 0;
+  // The timestamp when progress was last made in the data buffer. It's used in CleanupEvents().
+  std::chrono::time_point<std::chrono::steady_clock> last_progress_time_ =
+      std::chrono::steady_clock::now();
 
   // Keep some stats on ParseFrames() attempts.
   int stat_valid_frames_ = 0;

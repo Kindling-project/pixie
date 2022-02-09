@@ -178,9 +178,8 @@ type Bridge struct {
 
 	hbSeqNum int64
 
-	nc         *nats.Conn
-	natsCh     chan *nats.Msg
-	registered bool
+	nc     *nats.Conn
+	natsCh chan *nats.Msg
 	// There are a two sets of streams that we manage for the GRPC side. The incoming
 	// data and the outgoing data. GRPC does not natively provide a channel based interface
 	// so we wrap the Send/Recv calls with goroutines that are responsible for
@@ -223,7 +222,6 @@ func New(vizierID uuid.UUID, jwtSigningKey string, deployKey string, sessionID i
 		nc:            nc,
 		// Buffer NATS channels to make sure we don't back-pressure NATS
 		natsCh:            make(chan *nats.Msg, 5000),
-		registered:        false,
 		ptOutCh:           make(chan *vzconnpb.V2CBridgeMessage, 5000),
 		grpcOutCh:         make(chan *vzconnpb.V2CBridgeMessage, 5000),
 		grpcInCh:          make(chan *vzconnpb.C2VBridgeMessage, 5000),
@@ -237,7 +235,7 @@ func New(vizierID uuid.UUID, jwtSigningKey string, deployKey string, sessionID i
 // WatchDog watches and make sure the bridge is functioning. If not commits suicide to try to self-heal.
 func (s *Bridge) WatchDog() {
 	defer s.wdWg.Done()
-	t := time.NewTicker(30 * time.Second)
+	t := time.NewTicker(10 * time.Minute)
 
 	for {
 		lastHbSeq := atomic.LoadInt64(&s.hbSeqNum)
@@ -302,10 +300,10 @@ func (s *Bridge) RunStream() {
 		var err error
 
 		connect := func() error {
-			log.Info("Connecting to VZConn...")
+			log.Info("Connecting to VZConn in Pixie Cloud...")
 			vzClient, err = NewVZConnClient(s.vzOperator)
 			if err != nil {
-				log.WithError(err).Error("Failed to connect to VZConn")
+				log.WithError(err).Error(fmt.Sprintf("Failed to connect to Pixie Cloud. Please check your firewall settings and confirm that %s is correct and accessible from your cluster.", viper.GetString("cloud_addr")))
 			}
 			return err
 		}
@@ -316,9 +314,9 @@ func (s *Bridge) RunStream() {
 		backOffOpts.MaxElapsedTime = 30 * time.Minute
 		err = backoff.Retry(connect, backOffOpts)
 		if err != nil {
-			log.WithError(err).Fatal("Could not connect to VZConn")
+			log.WithError(err).Fatal(fmt.Sprintf("Failed to connect to Pixie Cloud. Please check your firewall settings and confirm that %s is correct and accessible from your cluster.", viper.GetString("cloud_addr")))
 		}
-		log.Info("Successfully connected to VZConn")
+		log.Info("Successfully connected to Pixie Cloud via VZConn")
 		s.vzConnClient = vzClient
 	}
 
@@ -340,35 +338,33 @@ func (s *Bridge) RunStream() {
 		backOffOpts.MaxElapsedTime = 10 * time.Minute
 		err = backoff.Retry(connectNats, backOffOpts)
 		if err != nil {
-			log.WithError(err).Fatal("Could not connect to NATS")
+			log.WithError(err).Fatal("Could not connect to NATS. Please check for the `pl-nats` pods in the namespace to confirm they are healthy and running.")
 		}
 		log.Info("Successfully connected to NATS")
 		s.nc = nc
 	}
 
-	if s.nc != nil {
-		s.nc.SetErrorHandler(func(conn *nats.Conn, subscription *nats.Subscription, err error) {
-			log.WithField("Sub", subscription.Subject).
-				WithError(err).
-				Error("Error with NATS handler")
-		})
+	s.nc.SetErrorHandler(func(conn *nats.Conn, subscription *nats.Subscription, err error) {
+		log.WithField("Sub", subscription.Subject).
+			WithError(err).
+			Error("Error with NATS handler")
+	})
 
-		natsTopic := messagebus.V2CTopic("*")
-		log.WithField("topic", natsTopic).Trace("Subscribing to NATS")
-		natsSub, err := s.nc.ChanSubscribe(natsTopic, s.natsCh)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to subscribe to NATS.")
-		}
-		defer func() {
-			err := natsSub.Unsubscribe()
-			if err != nil {
-				log.WithError(err).Error("Failed to unsubscribe from NATS")
-			}
-		}()
+	natsTopic := messagebus.V2CTopic("*")
+	log.WithField("topic", natsTopic).Trace("Subscribing to NATS")
+	natsSub, err := s.nc.ChanSubscribe(natsTopic, s.natsCh)
+	if err != nil {
+		log.WithError(err).Fatal("Could not subscribe to NATS. Please check for the `pl-nats` pods in the namespace to confirm they are healthy and running.")
 	}
+	defer func() {
+		err := natsSub.Unsubscribe()
+		if err != nil {
+			log.WithError(err).Error("Failed to unsubscribe from NATS")
+		}
+	}()
 
 	// Check if there is an existing update job. If so, then set the status to "UPDATING".
-	_, err := s.vzInfo.GetJob(upgradeJobName)
+	_, err = s.vzInfo.GetJob(upgradeJobName)
 	if err != nil && !k8sErrors.IsNotFound(err) {
 		log.WithError(err).Fatal("Could not check for upgrade job")
 	}
@@ -381,7 +377,7 @@ func (s *Bridge) RunStream() {
 	if s.vizierID == uuid.Nil {
 		err = s.RegisterDeployment()
 		if err != nil {
-			log.WithError(err).Fatal("Failed to register vizier deployment")
+			log.WithError(err).Fatal("Failed to register vizier deployment. If deploying via Helm or Manifest, please check your deployment key. Otherwise, ensure you have deployed with an authorized account.")
 		}
 	}
 
@@ -394,20 +390,17 @@ func (s *Bridge) RunStream() {
 	go s.WatchDog()
 
 	for {
-		s.registered = false
 		select {
 		case <-s.quitCh:
 			return
 		default:
 			log.Trace("Starting stream")
-			errCh := make(chan error)
-			err := s.StartStream(errCh)
+			err := s.StartStream()
 			if err == nil {
 				log.Trace("Stream ending")
 			} else {
 				log.WithError(err).Error("Stream errored. Restarting stream")
 			}
-			close(errCh)
 		}
 	}
 }
@@ -629,6 +622,8 @@ func (s *Bridge) doRegistrationHandshake(stream vzconnpb.VZConnService_NATSBridg
 
 	for {
 		select {
+		case <-stream.Context().Done():
+			return errors.New("registration unsuccessful: stream closed before complete")
 		case <-time.After(registrationTimeout):
 			log.Info("Timeout with registration terminating stream")
 			return ErrRegistrationTimeout
@@ -646,7 +641,6 @@ func (s *Bridge) doRegistrationHandshake(stream vzconnpb.VZConnService_NATSBridg
 			case cvmsgspb.ST_FAILED_NOT_FOUND:
 				return errors.New("registration not found, cluster unknown in pixie-cloud")
 			case cvmsgspb.ST_OK:
-				s.registered = true
 				return nil
 			default:
 
@@ -657,40 +651,59 @@ func (s *Bridge) doRegistrationHandshake(stream vzconnpb.VZConnService_NATSBridg
 }
 
 // StartStream starts the stream between the cloud connector and Vizier connector.
-func (s *Bridge) StartStream(errCh chan error) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := s.vzConnClient.NATSBridge(ctx)
-	if err != nil {
-		log.WithError(err).Error("Error starting stream")
-		cancel()
-		return err
-	}
+func (s *Bridge) StartStream() error {
+	var stream vzconnpb.VZConnService_NATSBridgeClient
+	cancel := func() {}
 	// Wait for  all goroutines to terminate.
 	defer func() {
 		s.wg.Wait()
 	}()
-
-	// Setup the stream reader go routine.
 	done := make(chan bool)
 	defer close(done)
-	// Cancel the stream to make sure everything get shutdown properly.
-	defer func() {
-		cancel()
-	}()
 
-	s.wg.Add(1)
-	go s.startStreamGRPCReader(stream, done, errCh)
-	s.wg.Add(1)
-	go s.startStreamGRPCWriter(stream, done, errCh)
+	// We backoff-retry the registration logic but immediately fail the core-logic.
+	backOffOpts := backoff.NewExponentialBackOff()
+	backOffOpts.InitialInterval = 30 * time.Second
+	backOffOpts.Multiplier = 2
+	backOffOpts.MaxElapsedTime = 30 * time.Minute
+	err := backoff.Retry(func() error {
+		select {
+		case <-s.quitCh:
+			return nil
+		default:
+		}
 
-	if !s.registered {
-		// Need to do registration handshake before we allow any cvmsgs.
-		err := s.doRegistrationHandshake(stream)
+		log.Trace("Start Vizier registration")
+		var err error
+		var ctx context.Context
+		ctx, cancel = context.WithCancel(context.Background())
+		stream, err = s.vzConnClient.NATSBridge(ctx)
 		if err != nil {
+			log.WithError(err).Error("Error starting grpc stream")
+			cancel()
 			return err
 		}
+		s.wg.Add(1)
+		go s.startStreamGRPCReader(stream, done)
+		s.wg.Add(1)
+		go s.startStreamGRPCWriter(stream, done)
+
+		// Need to do registration handshake before we allow any cvmsgs.
+		err = s.doRegistrationHandshake(stream)
+		if err != nil {
+			log.WithError(err).Error("Error doing registration handshake")
+			cancel()
+			return err
+		}
+		log.Trace("Complete Vizier registration")
+		return nil
+	}, backOffOpts)
+
+	// Defer is placed after backoff because we re-assign the cancel inside the backoff retry.
+	defer cancel()
+	if err != nil {
+		return err
 	}
-	log.Trace("Registration Complete.")
 
 	// Check to see if Stop was called while we waited for the
 	// registrationHandshake and if so, skip setting up NATS
@@ -702,11 +715,15 @@ func (s *Bridge) StartStream(errCh chan error) error {
 	}
 
 	s.wg.Add(1)
-	err = s.HandleNATSBridging(stream, done, errCh)
-	return err
+	err = s.HandleNATSBridging(stream, done)
+	if err != nil {
+		log.WithError(err).Error("Error inside NATS bridge")
+		return err
+	}
+	return nil
 }
 
-func (s *Bridge) startStreamGRPCReader(stream vzconnpb.VZConnService_NATSBridgeClient, done chan bool, errCh chan<- error) {
+func (s *Bridge) startStreamGRPCReader(stream vzconnpb.VZConnService_NATSBridgeClient, done chan bool) {
 	defer s.wg.Done()
 	log.Trace("Starting GRPC reader stream")
 	defer log.Trace("Closing GRPC read stream")
@@ -740,7 +757,7 @@ func (s *Bridge) startStreamGRPCReader(stream vzconnpb.VZConnService_NATSBridgeC
 	}
 }
 
-func (s *Bridge) startStreamGRPCWriter(stream vzconnpb.VZConnService_NATSBridgeClient, done chan bool, errCh chan<- error) {
+func (s *Bridge) startStreamGRPCWriter(stream vzconnpb.VZConnService_NATSBridgeClient, done chan bool) {
 	defer s.wg.Done()
 	log.Trace("Starting GRPC writer stream")
 	defer log.Trace("Closing GRPC writer stream")
@@ -750,14 +767,7 @@ func (s *Bridge) startStreamGRPCWriter(stream vzconnpb.VZConnService_NATSBridgeC
 		if s.pendingGRPCOutMsg != nil {
 			err := stream.Send(s.pendingGRPCOutMsg)
 			if err != nil {
-				// Error sending message. The stream might terminate in the middle so the select
-				// guards against exited goroutines to prevent a hang.
-				select {
-				case errCh <- err:
-				case <-done:
-				case <-s.quitCh:
-				}
-
+				log.WithError(err).Error("Error sending GRPC message")
 				return
 			}
 			s.pendingGRPCOutMsg = nil
@@ -768,6 +778,7 @@ func (s *Bridge) startStreamGRPCWriter(stream vzconnpb.VZConnService_NATSBridgeC
 			err := stream.Send(m)
 			if err != nil {
 				// Need to resend this message.
+				log.WithError(err).Error("Error sending GRPC message")
 				s.pendingGRPCOutMsg = m
 				return
 			}
@@ -835,9 +846,9 @@ func (s *Bridge) parseV2CNatsMsg(data *nats.Msg) (*cvmsgspb.V2CMessage, string, 
 }
 
 // HandleNATSBridging routes message to and from cloud NATS.
-func (s *Bridge) HandleNATSBridging(stream vzconnpb.VZConnService_NATSBridgeClient, done chan bool, errCh chan error) error {
+func (s *Bridge) HandleNATSBridging(stream vzconnpb.VZConnService_NATSBridgeClient, done chan bool) error {
 	defer s.wg.Done()
-	defer log.Info("Closing NATS Bridge")
+	defer log.Info("Closing NATS Bridge. This is expected behavior which happens periodically")
 	// Vizier -> Cloud side:
 	// 1. Listen to NATS on v2c.<topic>.
 	// 2. Extract Topic from the stream name above.
@@ -857,13 +868,12 @@ func (s *Bridge) HandleNATSBridging(stream vzconnpb.VZConnService_NATSBridgeClie
 			return nil
 		case <-done:
 			return nil
-		case e := <-errCh:
-			log.WithError(e).Error("GRPC error, terminating stream")
-			return e
 		case data := <-s.natsCh:
 			v2cPrefix := messagebus.V2CTopic("")
 			if !strings.HasPrefix(data.Subject, v2cPrefix) {
-				return errors.New("invalid subject: " + data.Subject)
+				err := errors.New("invalid subject: " + data.Subject)
+				log.WithError(err).Error("Invalid subject sent to nats channel")
+				return err
 			}
 
 			v2cMsg, topic, err := s.parseV2CNatsMsg(data)
@@ -888,11 +898,6 @@ func (s *Bridge) HandleNATSBridging(stream vzconnpb.VZConnService_NATSBridgeClie
 			if bridgeMsg == nil {
 				return nil
 			}
-
-			log.
-				WithField("msg", bridgeMsg.String()).
-				WithField("type", bridgeMsg.Msg.TypeUrl).
-				Trace("Got Message on GRPC channel")
 
 			if bridgeMsg.Topic == "VizierUpdate" {
 				err := s.handleUpdateMessage(bridgeMsg.Msg)
@@ -938,16 +943,12 @@ func (s *Bridge) HandleNATSBridging(stream vzconnpb.VZConnService_NATSBridgeClie
 				return err
 			}
 
-			log.WithField("topic", topic).
-				WithField("msg", natsMsg.String()).
-				Trace("Publishing to NATS")
 			err = s.nc.Publish(topic, b)
 			if err != nil {
 				log.WithError(err).Error("Failed to publish")
 				return err
 			}
 		case hbMsg := <-hbChan:
-			log.WithField("heartbeat", hbMsg.GoString()).Trace("Sending heartbeat")
 			err := s.publishProtoToBridgeCh(HeartbeatTopic, hbMsg)
 			if err != nil {
 				return err

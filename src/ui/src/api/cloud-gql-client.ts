@@ -28,7 +28,7 @@ import {
 } from '@apollo/client/core';
 import { setContext } from '@apollo/client/link/context';
 import { onError } from '@apollo/client/link/error';
-import { persistCache } from 'apollo3-cache-persist';
+import { CachePersistor } from 'apollo3-cache-persist';
 import fetch from 'cross-fetch';
 
 import { GetCSRFCookie } from '../pages/auth/utils';
@@ -48,8 +48,11 @@ const makeCloudAuthLink = (opts: PixieAPIClientOptions) => setContext((_, { head
 }));
 
 // Apollo link that redirects to login page on HTTP status 401.
-const loginRedirectLink = (on401: (errorMessage?: string) => void) => onError(({ networkError }) => {
-  if (window.location.pathname.startsWith('/embed')) {
+const loginRedirectLink = (on401: (errorMessage?: string) => void) => onError(({ networkError, operation }) => {
+  const isEmbed = window.location.pathname.startsWith('/embed');
+  const isLogin = window.location.pathname.endsWith('/login');
+  const isCacheOnly = operation.operationName.endsWith('Cache');
+  if (isEmbed || isLogin || isCacheOnly) {
     return;
   }
 
@@ -67,14 +70,39 @@ export interface GetClusterConnResults {
   clusterConnection: ClusterConnection;
 }
 
+/**
+ * Uses localStorage if it's available; uses an in-memory Map otherwise.
+ * NodeJS doesn't implement it.
+ * Browsers sometimes block access (iframes, incognito, etc).
+ */
+const localStorageShim = (() => {
+  let useLocalStorage = true;
+  try {
+    globalThis.localStorage.getItem('checkAccess');
+  } catch (e) {
+    useLocalStorage = false;
+  }
+
+  return useLocalStorage ? globalThis.localStorage : (() => {
+    const map = new Map<string, any>();
+    return {
+      getItem: (k: string) => map.get(k),
+      setItem: (k: string, v: any) => {
+        map.set(k, v);
+      },
+      removeItem: (k: string) => {
+        map.delete(k);
+      },
+    };
+  })();
+})();
+
 export class CloudClient {
   graphQL: ApolloClient<NormalizedCacheObject>;
 
-  private readonly persistPromise: Promise<void>;
-
   private readonly cache: InMemoryCache;
 
-  private loaded = false;
+  private persistor: CachePersistor<NormalizedCacheObject>;
 
   constructor(opts: PixieAPIClientOptions) {
     this.cache = new InMemoryCache({
@@ -99,43 +127,104 @@ export class CloudClient {
       ]),
     });
 
-    // On NodeJS, there is no localStorage. However, we still want to cache at runtime, so use a Map.
-    // In a browser, we can use localStorage normally.
-    let useLocalStorage = true;
-    try {
-      // Checks if localStorage is defined, and if localStorge is accessible. The latter
-      // may not be possible if in an embedded environment.
-      globalThis.localStorage.setItem('checkAccess', '');
-    } catch (e) {
-      useLocalStorage = false;
-    }
+    // Cache persistence is isolated per-user, and we use their ID to do that.
+    // The user's ID comes from a query too, so we use InMemoryCache at first.
+    // Persistence catches up (merging InMemoryCache on top) when ID is ready.
+    let userId: string;
+    this.cache.watch({
+      optimistic: true,
+      query: gql`
+        query getUserIdFromCache {
+          user {
+            id
+          }
+        }
+      `,
+      callback: ({ result }) => {
+        // Don't persist until we know which user we're caching for.
+        if (!result.user?.id) return;
 
-    const storage = useLocalStorage ? globalThis.localStorage : (() => {
-      const map = new Map<string, any>();
-      return {
-        getItem: (k: string) => map.get(k),
-        setItem: (k: string, v: any) => {
-          map.set(k, v);
-        },
-        removeItem: (k: string) => {
-          map.delete(k);
-        },
-      };
-    })();
+        // If nothing changed, don't reset persistence.
+        if (userId && userId === result.user.id) return;
 
-    this.persistPromise = persistCache({
-      cache: this.cache,
-      storage,
-    }).then(() => {
-      this.loaded = true;
+        // The user ID shouldn't be changing without a logout or refresh.
+        // If it does, that's a new feature that we didn't account for, so throw.
+        if (userId && userId !== result.user.id) {
+          throw new Error(
+            `Cache key is set to "${userId}", but user ID changed to "${result.user.id}"`,
+          );
+        }
+
+        userId = result.user.id;
+        this.setupPersistence(userId);
+      },
     });
   }
 
-  async getGraphQLPersist(): Promise<CloudClient['graphQL']> {
-    if (!this.loaded) {
-      await this.persistPromise;
+  /**
+   * Cache persistence isn't enabled right away, as it's isolated per-user.
+   * To get the user ID, we need to start with InMemoryCache and query upstream.
+   * Once we have the ID, we restore their cache (if present), merge the
+   * in-memory cache onto it, and resume normal persistence - all silently.
+   *
+   * @param userId User whose cache should be used.
+   */
+  private async setupPersistence(userId: string) {
+    const cacheKey = `apollo-cache-${userId}`;
+
+    // Grab contents of in-memory cache before clobbering
+    const memory = this.cache.extract();
+
+    this.persistor = new CachePersistor({
+      key: cacheKey,
+      cache: this.cache,
+      storage: localStorageShim,
+    });
+
+    // Pause auto-save until we're done moving data around.
+    this.persistor.pause();
+
+    // Clobber in-memory cache with what was persisted (if it existed),
+    // Then grab those contents to compare against what was in-memory before.
+    await this.persistor.restore();
+    const stored = this.cache.extract();
+
+    // Overwrite objects in the stored cache with conflicting ones from memory.
+    // Should technically be a deep merge; clobbering is good enough though.
+    const merged: NormalizedCacheObject = {
+      ...stored,
+      ...memory,
+    };
+    if (memory.ROOT_QUERY || stored.ROOT_QUERY) {
+      merged.ROOT_QUERY = {
+        ...(stored.ROOT_QUERY ?? {}),
+        ...(memory.ROOT_QUERY ?? {}),
+      };
     }
-    return this.graphQL;
+    if (memory.ROOT_MUTATION || stored.ROOT_MUTATION) {
+      merged.ROOT_MUTATION = {
+        ...(stored.ROOT_MUTATION ?? {}),
+        ...(memory.ROOT_MUTATION ?? {}),
+      };
+    }
+
+    // As before, restoring a cache purges what's there first.
+    this.cache.restore(merged);
+
+    // Running garbage collection removes cached entries that aren't referenced anywhere in ROOT_QUERY.
+    // Example: if the user joins an org, this will remove the entry about their previous (null) org.
+    // This also makes sure that anything overridden from `stored` by `memory` gets cleaned up.
+    this.cache.gc();
+
+    // Done manipulating data; let it flush to storage.
+    this.persistor.resume();
+  }
+
+  async purgeCache(): Promise<void> {
+    this.persistor?.pause();
+    await this.persistor?.purge();
+    await this.graphQL.clearStore();
+    this.persistor?.resume();
   }
 
   /**

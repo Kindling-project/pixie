@@ -35,10 +35,6 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
     color: theme.palette.text.primary,
     ...scrollbarStyles(theme),
   },
-  title: {
-    flexGrow: 1,
-    marginLeft: theme.spacing(2),
-  },
   row: {
     width: '100%',
     float: 'left',
@@ -63,14 +59,6 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
     color: theme.palette.foreground.grey5,
     fontWeight: theme.typography.fontWeightBold,
   },
-  topbarTitle: {
-    ...theme.typography.h6,
-    color: theme.palette.foreground.grey5,
-    fontWeight: theme.typography.fontWeightBold,
-    display: 'flex',
-    alignItems: 'center',
-    height: '100%',
-  },
   floatLeft: {
     float: 'left',
   },
@@ -78,7 +66,7 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
     textAlign: 'center',
   },
   container: {
-    maxWidth: '1290px',
+    maxWidth: theme.breakpoints.values.lg,
     marginLeft: 'auto',
     marginRight: 'auto',
     width: '80%',
@@ -123,7 +111,7 @@ const LicenseEntryRow = React.memo<LicenseEntry>(({ name, url, licenseText }) =>
   const classes = useStyles();
   const [showLicense, setShowLicense] = React.useState(false);
   return (
-    <div className={classes.row}>
+    <div className={classes.row} role='listitem'>
       <div className={classes.floatLeft}>
         {name}
       </div>
@@ -142,7 +130,7 @@ const LicenseEntryRow = React.memo<LicenseEntry>(({ name, url, licenseText }) =>
       </div>
       {showLicense
         ? (
-          <div className={classes.licenseBody}>
+          <div className={classes.licenseBody} role='document'>
             <br />
             <pre>
               {licenseText}
@@ -168,7 +156,7 @@ const Credits: React.FC<{ licenses: LicenseEntry[] }> = ({ licenses }) => {
         <h1>Credits</h1>
         <h4>Third party packages we use and love.</h4>
       </div>
-      <div className={classes.container}>
+      <div className={classes.container} role='list'>
         {licenses.map((license: LicenseEntry) => <LicenseEntryRow {...license} key={license.name} />)}
       </div>
     </>

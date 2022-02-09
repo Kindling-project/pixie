@@ -22,9 +22,9 @@ import {
   KeyboardArrowDown as DownIcon,
   KeyboardArrowUp as UpIcon,
 } from '@mui/icons-material';
-import { Fab, Tab, Tabs } from '@mui/material';
-import { Theme } from '@mui/material/styles';
-import { createStyles, makeStyles, withStyles } from '@mui/styles';
+import { alpha, Fab, Tab, Tabs } from '@mui/material';
+import { Theme, styled } from '@mui/material/styles';
+import { createStyles, makeStyles } from '@mui/styles';
 
 import { LazyPanel, ResizableDrawer, Spinner } from 'app/components';
 import { MinimalLiveDataTable } from 'app/containers/live-data-table/live-data-table';
@@ -37,10 +37,6 @@ import ExecutionStats from './execution-stats';
 export const STATS_TAB_NAME = 'stats';
 
 const useStyles = makeStyles((theme: Theme) => createStyles({
-  splits: {
-    '& .gutter': {
-    },
-  },
   drawerRoot: {
     position: 'relative',
     display: 'flex',
@@ -76,10 +72,6 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
   emptyLabel: {
     display: 'none',
   },
-  label: {
-    paddingLeft: theme.spacing(2),
-    paddingRight: theme.spacing(2),
-  },
   selectedTabLabel: {
     color: `${theme.palette.primary.light} !important`,
   },
@@ -94,7 +86,6 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
       right: 0,
     },
     opacity: 1,
-    color: theme.palette.foreground.three,
     minWidth: 0,
     paddingLeft: `${theme.spacing(1.4)} !important`,
     paddingRight: `${theme.spacing(1.4)} !important`,
@@ -105,10 +96,6 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
   },
   statsTabLabel: {
     paddingRight: `${theme.spacing(2)} !important`,
-    color: theme.palette.foreground.three,
-    '&:focus': {
-      color: `${theme.palette.primary.light} !important`,
-    },
   },
   toggle: {
     display: 'flex',
@@ -117,7 +104,7 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
   },
   fab: {
     height: theme.spacing(2),
-    zIndex: 100,
+    zIndex: theme.zIndex.drawer - 1, // Let overflow hide behind the drawer
     borderTopLeftRadius: theme.spacing(1),
     borderTopRightRadius: theme.spacing(1),
     borderBottomLeftRadius: 0,
@@ -130,40 +117,32 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
     flexDirection: 'column',
     width: '100%',
   },
-}));
+}), { name: 'DataDrawer' });
 
 const TabSpacer = React.memo(() => <div className={useStyles().spacer} />);
 TabSpacer.displayName = 'TabSpacer';
 
 // eslint-disable-next-line react-memo/require-memo
-const StyledTabs = withStyles((theme: Theme) => createStyles({
-  root: {
-    minHeight: theme.spacing(4),
-  },
-  indicator: {
+const StyledTabs = styled(Tabs)(({ theme }) => ({
+  minHeight: theme.spacing(4),
+  '& .MuiTabs-indicator': {
     backgroundColor: theme.palette.foreground.one,
   },
-}))(Tabs);
+}));
 
 // eslint-disable-next-line react-memo/require-memo
-const StyledTab = withStyles((theme: Theme) => createStyles({
-  root: {
-    minHeight: theme.spacing(4),
-    padding: 0,
-    textTransform: 'none',
-    '&:focus': {
-      color: theme.palette.foreground.two,
-    },
-    color: `${theme.palette.primary.dark}80`, // Make text darker by lowering opacity to 50%.
-    ...theme.typography.subtitle1,
-    fontWeight: 400,
-    maxWidth: 300,
+const StyledTab = styled(Tab)(({ theme }) => ({
+  minHeight: theme.spacing(4),
+  padding: 0,
+  textTransform: 'none',
+  '&:focus': {
+    color: theme.palette.foreground.two,
   },
-  wrapper: {
-    alignItems: 'flex-start',
-  },
-
-}))(Tab);
+  color: alpha(theme.palette.primary.dark, 0.5),
+  ...theme.typography.subtitle1,
+  fontWeight: 400,
+  maxWidth: theme.spacing(37.5), // 300px
+}));
 
 const DataDrawer = React.memo<{ open: boolean }>(({ open }) => {
   const classes = useStyles();
@@ -229,7 +208,7 @@ const DataDrawer = React.memo<{ open: boolean }>(({ open }) => {
         {
           stats ? (
             <StyledTab
-              className={classes.statsTabLabel}
+              className={`${classes.statsTabLabel} ${STATS_TAB_NAME !== activeTab ? '' : classes.selectedTabLabel}`}
               value={STATS_TAB_NAME}
               label='Execution Stats'
             />

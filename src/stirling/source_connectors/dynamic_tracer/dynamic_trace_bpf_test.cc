@@ -32,12 +32,10 @@
 
 constexpr std::string_view kClientPath =
     "src/stirling/source_connectors/socket_tracer/protocols/http2/testing/go_grpc_client/"
-    "go_grpc_client_/"
-    "go_grpc_client";
+    "golang_1_16_grpc_client";
 constexpr std::string_view kServerPath =
     "src/stirling/source_connectors/socket_tracer/protocols/http2/testing/go_grpc_server/"
-    "go_grpc_server_/"
-    "go_grpc_server";
+    "golang_1_16_grpc_server";
 
 namespace px {
 namespace stirling {
@@ -88,7 +86,7 @@ class GoHTTPDynamicTraceTest : public ::testing::Test {
                          DynamicTraceConnector::Create("my_dynamic_source", &logical_program_));
     ASSERT_OK(connector_->Init());
 
-    ASSERT_OK(c_.Start({client_path_, "-name=PixieLabs", "-count=200",
+    ASSERT_OK(c_.Start({client_path_, "-name=PixieLabs", "-count=10",
                         absl::StrCat("-address=localhost:", s_port_)}));
     EXPECT_EQ(0, c_.Wait()) << "Client should be killed";
   }
@@ -186,7 +184,7 @@ TEST_F(GoHTTPDynamicTraceTest, TraceGolangHTTPClientAndServer) {
     types::ColumnWrapperRecordBatch records =
         FindRecordsMatchingPID(tablets[0].records, /*index*/ 0, s_.child_pid());
 
-    ASSERT_THAT(records, Each(ColWrapperSizeIs(200)));
+    ASSERT_THAT(records, Each(ColWrapperSizeIs(10)));
 
     constexpr size_t kStreamIDIdx = 3;
     constexpr size_t kEndStreamIdx = 4;
@@ -210,7 +208,7 @@ TEST_F(GoHTTPDynamicTraceTest, TraceReturnValue) {
     types::ColumnWrapperRecordBatch records =
         FindRecordsMatchingPID(tablets[0].records, /*index*/ 0, s_.child_pid());
 
-    ASSERT_THAT(records, Each(ColWrapperSizeIs(1600)));
+    ASSERT_THAT(records, Each(ColWrapperSizeIs(80)));
 
     constexpr size_t kFrameHeaderValidIdx = 3;
 

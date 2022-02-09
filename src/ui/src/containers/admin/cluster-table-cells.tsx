@@ -76,7 +76,7 @@ const useInstrumentationLevelStyles = makeStyles((theme: Theme) => createStyles(
   high: {
     color: theme.palette.success.main,
   },
-}));
+}), { name: 'InstrumentationLevel' });
 
 // eslint-disable-next-line react-memo/require-memo
 export const InstrumentationLevelCell: React.FC<{ cluster: InstrumentationClusterInfo }> = ({ cluster }) => {
@@ -89,14 +89,14 @@ export const InstrumentationLevelCell: React.FC<{ cluster: InstrumentationCluste
 InstrumentationLevelCell.displayName = 'InstrumentationLevelCell';
 
 const useClusterStatusCellStyle = makeStyles((theme: Theme) => createStyles({
-  status: {
-    display: 'inline-block',
+  statusCell: {
+    display: 'flex',
+    flexFlow: 'row nowrap',
+    '& :not(:last-child)': {
+      marginRight: theme.spacing(1),
+    },
   },
-  message: {
-    paddingLeft: theme.spacing(1),
-    display: 'inline-block',
-  },
-}));
+}), { name: 'ClusterStatusCell' });
 
 // eslint-disable-next-line react-memo/require-memo
 export const ClusterStatusCell: React.FC<{ status: GQLClusterStatus, message?: string }> = ({ status, message }) => {
@@ -104,10 +104,10 @@ export const ClusterStatusCell: React.FC<{ status: GQLClusterStatus, message?: s
 
   return (<AdminTooltip title={status.replace('CS_', '')}>
     <StyledLeftTableCell>
-      <div className={classes.status}>
+      <div className={classes.statusCell}>
         <StatusCell statusGroup={clusterStatusGroup(status)} />
+        {message && <span>{message}</span>}
       </div>
-      {message && <div className={classes.message}>{message}</div>}
     </StyledLeftTableCell>
   </AdminTooltip>
   );
@@ -122,11 +122,11 @@ export const VizierVersionCell: React.FC<{ version: string }> = ({ version }) =>
 );
 VizierVersionCell.displayName = 'VizierVersionCell';
 
-const useMonoCells = makeStyles(() => createStyles({
+const useMonoCells = makeStyles(({ typography }: Theme) => createStyles({
   mono: {
-    fontFamily: '"Roboto Mono", Monospace',
+    fontFamily: typography.monospace.fontFamily,
   },
-}));
+}), { name: 'MonoSpaceCell' });
 
 // MonoSpaceCell renders the in monospace.
 // eslint-disable-next-line react-memo/require-memo

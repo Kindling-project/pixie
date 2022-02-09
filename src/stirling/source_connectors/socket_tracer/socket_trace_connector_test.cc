@@ -34,6 +34,7 @@
 #include "src/stirling/source_connectors/socket_tracer/protocols/mysql/test_utils.h"
 #include "src/stirling/source_connectors/socket_tracer/testing/event_generator.h"
 #include "src/stirling/source_connectors/socket_tracer/testing/http2_stream_generator.h"
+#include "src/stirling/source_connectors/socket_tracer/testing/socket_trace_connector_friend.h"
 #include "src/stirling/testing/common.h"
 
 namespace px {
@@ -174,8 +175,8 @@ class SocketTraceConnectorTest : public ::testing::Test {
 
   void SetUp() override {
     // Create and configure the connector.
-    connector_ = SocketTraceConnector::Create("socket_trace_connector");
-    source_ = dynamic_cast<SocketTraceConnector*>(connector_.get());
+    connector_ = SocketTraceConnectorFriend::Create("socket_trace_connector");
+    source_ = dynamic_cast<SocketTraceConnectorFriend*>(connector_.get());
     ASSERT_NE(nullptr, source_);
 
     ctx_ = std::make_unique<StandaloneContext>();
@@ -204,7 +205,7 @@ class SocketTraceConnectorTest : public ::testing::Test {
   DataTable* cql_table_;
 
   std::unique_ptr<SourceConnector> connector_;
-  SocketTraceConnector* source_ = nullptr;
+  SocketTraceConnectorFriend* source_ = nullptr;
   std::unique_ptr<StandaloneContext> ctx_;
   testing::MockClock mock_clock_;
   testing::RealClock real_clock_;
@@ -724,6 +725,49 @@ TEST_F(SocketTraceConnectorTest, ConnectionCleanupNoProtocol) {
 
   connector_->TransferData(ctx_.get(), data_tables_->tables());
   EXPECT_NOT_OK(source_->GetConnTracker(kPID, kFD));
+}
+
+TEST_F(SocketTraceConnectorTest, ConnectionCleanupCollecting) {
+  testing::EventGenerator event_gen(&mock_clock_);
+
+  // Create an event with family PX_AF_UNKNOWN so that tracker goes into collecting state.
+  struct socket_control_event_t conn0 = event_gen.InitConn();
+  conn0.open.addr.sa.sa_family = PX_AF_UNKNOWN;
+
+  std::unique_ptr<SocketDataEvent> conn0_req_event =
+      event_gen.InitSendEvent<kProtocolHTTP>(kReq0.substr(0, 10));
+
+  // Need an initial TransferData() to initialize the times.
+  connector_->TransferData(ctx_.get(), data_tables_->tables());
+
+  source_->AcceptControlEvent(conn0);
+  source_->AcceptDataEvent(std::move(conn0_req_event));
+
+  // After events arrive, we expect the tracker to be in collecting state
+  {
+    ASSERT_OK_AND_ASSIGN(const ConnTracker* tracker, source_->GetConnTracker(kPID, kFD));
+    ASSERT_EQ(tracker->state(), ConnTracker::State::kCollecting);
+    ASSERT_GT(tracker->send_data().data_buffer().size(), 0);
+  }
+
+  connector_->TransferData(ctx_.get(), data_tables_->tables());
+
+  // With default TransferData(), we expect the data to be retained.
+  {
+    ASSERT_OK_AND_ASSIGN(const ConnTracker* tracker, source_->GetConnTracker(kPID, kFD));
+    ASSERT_EQ(tracker->state(), ConnTracker::State::kCollecting);
+    ASSERT_GT(tracker->send_data().data_buffer().size(), 0);
+  }
+
+  // Now set retention size to 0 and expect the collecting tracker to be cleaned-up.
+  SET_TEST_FLAG(FLAGS_datastream_buffer_retention_size, 0);
+  connector_->TransferData(ctx_.get(), data_tables_->tables());
+
+  {
+    ASSERT_OK_AND_ASSIGN(const ConnTracker* tracker, source_->GetConnTracker(kPID, kFD));
+    ASSERT_EQ(tracker->state(), ConnTracker::State::kCollecting);
+    ASSERT_EQ(tracker->send_data().data_buffer().size(), 0);
+  }
 }
 
 TEST_F(SocketTraceConnectorTest, ConnectionCleanupInactiveDead) {
@@ -1432,35 +1476,6 @@ TEST_F(SocketTraceConnectorTest, HTTP2ServerTest) {
               ::testing::HasSubstr(R"(":path":"/magic")"));
   EXPECT_THAT(record_batch[kHTTPRespHeadersIdx]->Get<types::StringValue>(0),
               ::testing::HasSubstr(R"(":status":"200")"));
-}
-
-// This test models capturing data mid-stream, where we may have missed the request headers.
-TEST_F(SocketTraceConnectorTest, HTTP2PartialStream) {
-  testing::EventGenerator event_gen(&real_clock_);
-
-  auto conn = event_gen.InitConn();
-
-  testing::StreamEventGenerator frame_generator(&real_clock_, conn.conn_id, 7);
-
-  source_->AcceptControlEvent(conn);
-  // Request headers are missing to model mid-stream capture.
-  source_->AcceptHTTP2Data(
-      frame_generator.GenDataFrame<kDataFrameEventWrite>("uest", /* end_stream */ true));
-  source_->AcceptHTTP2Data(frame_generator.GenDataFrame<kDataFrameEventRead>("Resp"));
-  source_->AcceptHTTP2Data(frame_generator.GenDataFrame<kDataFrameEventRead>("onse"));
-  source_->AcceptHTTP2Header(frame_generator.GenHeader<kHeaderEventRead>(":status", "200"));
-  source_->AcceptHTTP2Header(frame_generator.GenEndStreamHeader<kHeaderEventRead>());
-  source_->AcceptControlEvent(event_gen.InitClose());
-
-  connector_->TransferData(ctx_.get(), data_tables_->tables());
-
-  std::vector<TaggedRecordBatch> tablets = http_table_->ConsumeRecords();
-  ASSERT_FALSE(tablets.empty());
-  RecordBatch record_batch = tablets[0].records;
-  ASSERT_THAT(record_batch, Each(ColWrapperSizeIs(1)));
-  EXPECT_EQ(record_batch[kHTTPReqBodyIdx]->Get<types::StringValue>(0), "uest");
-  EXPECT_EQ(record_batch[kHTTPRespBodyIdx]->Get<types::StringValue>(0), "Response");
-  EXPECT_GT(record_batch[kHTTPLatencyIdx]->Get<types::Int64Value>(0), 0);
 }
 
 // This test models capturing data mid-stream, where we may have missed the request entirely.

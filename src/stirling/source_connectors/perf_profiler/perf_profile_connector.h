@@ -29,11 +29,13 @@
 #include "src/stirling/core/source_connector.h"
 #include "src/stirling/core/types.h"
 #include "src/stirling/source_connectors/perf_profiler/bcc_bpf_intf/stack_event.h"
+#include "src/stirling/source_connectors/perf_profiler/shared/types.h"
 #include "src/stirling/source_connectors/perf_profiler/stack_trace_id_cache.h"
 #include "src/stirling/source_connectors/perf_profiler/stack_traces_table.h"
 #include "src/stirling/source_connectors/perf_profiler/stringifier.h"
-#include "src/stirling/source_connectors/perf_profiler/symbolizer.h"
-#include "src/stirling/source_connectors/perf_profiler/types.h"
+#include "src/stirling/source_connectors/perf_profiler/symbolizers/bcc_symbolizer.h"
+#include "src/stirling/source_connectors/perf_profiler/symbolizers/caching_symbolizer.h"
+#include "src/stirling/source_connectors/perf_profiler/symbolizers/elf_symbolizer.h"
 #include "src/stirling/utils/stat_counter.h"
 
 namespace px {
@@ -62,6 +64,14 @@ class PerfProfileConnector : public SourceConnector, public bpf_tools::BCCWrappe
     return stack_trace_sampling_period_;
   }
 
+  enum class StatKey {
+    kBPFMapSwitchoverEvent,
+    kCumulativeSumOfAllStackTraces,
+    kLossHistoEvent,
+  };
+
+  utils::StatCounter<StatKey> stats() const { return stats_; }
+
  private:
   // The time interval between stack trace samples, i.e. the sample rate used inside of BPF.
   const std::chrono::milliseconds stack_trace_sampling_period_;
@@ -73,7 +83,7 @@ class PerfProfileConnector : public SourceConnector, public bpf_tools::BCCWrappe
   const std::chrono::milliseconds push_period_;
 
   // StackTraceHisto: SymbolicStackTrace => observation-count
-  using StackTraceHisto = absl::flat_hash_map<SymbolicStackTrace, uint64_t>;
+  using StackTraceHisto = absl::flat_hash_map<profiler::SymbolicStackTrace, uint64_t>;
 
   // RawHistoData: a list of stack trace keys that will need to be histogrammed.
   using RawHistoData = std::vector<stack_trace_key_t>;
@@ -123,12 +133,6 @@ class PerfProfileConnector : public SourceConnector, public bpf_tools::BCCWrappe
 
   ebpf::BPFPerfBuffer* histogram_a_perf_buffer_;
   ebpf::BPFPerfBuffer* histogram_b_perf_buffer_;
-
-  enum class StatKey {
-    kBPFMapSwitchoverEvent,
-    kCumulativeSumOfAllStackTraces,
-    kLossHistoEvent,
-  };
 
   const uint32_t stats_log_interval_;
   utils::StatCounter<StatKey> stats_;

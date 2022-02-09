@@ -27,7 +27,7 @@ import {
   TableRow,
 } from '@mui/material';
 import { Theme } from '@mui/material/styles';
-import { withStyles } from '@mui/styles';
+import { createStyles, makeStyles } from '@mui/styles';
 import { Link } from 'react-router-dom';
 
 import { GQLClusterInfo } from 'app/types/schema';
@@ -54,16 +54,17 @@ type ClusterRowInfo = Pick<GQLClusterInfo,
 'numInstrumentedNodes' |
 'lastHeartbeatMs'>;
 
-// eslint-disable-next-line react-memo/require-memo
-export const ClustersTable = withStyles((theme: Theme) => ({
+const useStyles = makeStyles((theme: Theme) => createStyles({
   error: {
     padding: theme.spacing(1),
   },
   removePadding: {
     padding: 0,
   },
-  // eslint-disable-next-line react-memo/require-memo
-}))(({ classes }: any) => {
+}), { name: 'ClustersTable' });
+
+export const ClustersTable = React.memo(() => {
+  const classes = useStyles();
   const { data, loading, error } = useQuery<{
     clusters: ClusterRowInfo[]
   }>(
@@ -119,7 +120,7 @@ export const ClustersTable = withStyles((theme: Theme) => ({
                 className={classes.removePadding}
                 component={Link}
                 to={getClusterDetailsURL(encodeURIComponent(cluster.clusterName))}
-                color='secondary'
+                color='info'
                 variant='text'
                 disabled={cluster.status === 'CS_DISCONNECTED'}
               >
@@ -135,3 +136,4 @@ export const ClustersTable = withStyles((theme: Theme) => ({
     </Table>
   );
 });
+ClustersTable.displayName = 'ClustersTable';

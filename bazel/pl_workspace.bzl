@@ -14,7 +14,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
 load("@com_github_bazelbuild_buildtools//buildifier:deps.bzl", "buildifier_dependencies")
 load("@distroless//package_manager:dpkg.bzl", "dpkg_list", "dpkg_src")
 load("@distroless//package_manager:package_manager.bzl", "package_manager_repositories")
@@ -25,8 +24,8 @@ load("@io_bazel_rules_docker//repositories:repositories.bzl", container_reposito
 load("@io_bazel_rules_docker//scala:image.bzl", _scala_image_repos = "repositories")
 load("@io_bazel_rules_k8s//k8s:k8s.bzl", "k8s_repositories")
 load("@io_bazel_rules_k8s//k8s:k8s_go_deps.bzl", k8s_go_deps = "deps")
-load("@io_bazel_toolchains//rules:gcs.bzl", "gcs_file")
 load("//bazel:container_images.bzl", "base_images", "stirling_test_build_images", "stirling_test_images")
+load("//bazel:gcs.bzl", "gcs_file")
 load("//bazel:linux_headers.bzl", "linux_headers")
 
 # Sets up package manager which we use build deploy images.
@@ -79,7 +78,6 @@ bazel_version_repository = repository_rule(
 )
 
 def pl_workspace_setup():
-    gazelle_dependencies()
     buildifier_dependencies()
 
     bazel_version_repository(name = "bazel_version")

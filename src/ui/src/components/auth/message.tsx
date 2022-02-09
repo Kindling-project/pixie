@@ -18,27 +18,15 @@
 
 import * as React from 'react';
 
-import {
-  alpha,
-  Typography,
-} from '@mui/material';
+import { Typography } from '@mui/material';
 import { Theme } from '@mui/material/styles';
-import { createStyles, withStyles, WithStyles } from '@mui/styles';
+import { createStyles, makeStyles } from '@mui/styles';
 
 import { CodeRenderer } from 'app/components/code-renderer/code-renderer';
 
 import { PixienautBox, PixienautBoxProps } from './pixienaut-box';
 
-const styles = ({ palette, spacing }: Theme) => createStyles({
-  root: {
-    backgroundColor: alpha(palette.foreground.grey3, 0.8),
-    paddingLeft: spacing(6),
-    paddingRight: spacing(6),
-    paddingTop: spacing(10),
-    paddingBottom: spacing(10),
-    boxShadow: `0px ${spacing(0.25)}px ${spacing(2)}px rgba(0, 0, 0, 0.6)`,
-    borderRadius: spacing(3),
-  },
+const useStyles = makeStyles(({ palette, spacing }: Theme) => createStyles({
   title: {
     color: palette.foreground.two,
   },
@@ -57,9 +45,9 @@ const styles = ({ palette, spacing }: Theme) => createStyles({
   code: {
     width: '100%',
   },
-});
+}), { name: 'AuthMessageBox' });
 
-export interface AuthMessageBoxProps extends WithStyles<typeof styles> {
+export interface AuthMessageBoxProps {
   error?: 'recoverable' | 'fatal';
   title: string;
   message: string;
@@ -68,17 +56,15 @@ export interface AuthMessageBoxProps extends WithStyles<typeof styles> {
   cta?: React.ReactNode;
 }
 
-// eslint-disable-next-line react-memo/require-memo
-export const AuthMessageBox = withStyles(styles)((props: AuthMessageBoxProps) => {
-  const {
-    error,
-    errorDetails,
-    title,
-    message,
-    code,
-    cta,
-    classes,
-  } = props;
+export const AuthMessageBox = React.memo<AuthMessageBoxProps>(({
+  error,
+  errorDetails,
+  title,
+  message,
+  code,
+  cta,
+}) => {
+  const classes = useStyles();
   // eslint-disable-next-line react-memo/require-usememo
   let scenario: PixienautBoxProps['image'] = 'balloon';
   if (error) {
@@ -109,3 +95,4 @@ export const AuthMessageBox = withStyles(styles)((props: AuthMessageBoxProps) =>
     </PixienautBox>
   );
 });
+AuthMessageBox.displayName = 'AuthMessageBox';

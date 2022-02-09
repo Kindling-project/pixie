@@ -19,6 +19,7 @@
 #include <fstream>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -286,14 +287,13 @@ Status ProcParser::ParseProcPIDStatIO(int32_t pid, ProcessStats* out) const {
   static_assert(std::is_standard_layout<ProcessStats>::value);
 
   static absl::flat_hash_map<std::string_view, size_t> field_name_to_offset_map{
-      {"rchar:", offsetof(ProcessStats, rchar_bytes)},
-      {"wchar:", offsetof(ProcessStats, wchar_bytes)},
-      {"read_bytes:", offsetof(ProcessStats, read_bytes)},
-      {"write_bytes:", offsetof(ProcessStats, write_bytes)},
+      {"rchar", offsetof(ProcessStats, rchar_bytes)},
+      {"wchar", offsetof(ProcessStats, wchar_bytes)},
+      {"read_bytes", offsetof(ProcessStats, read_bytes)},
+      {"write_bytes", offsetof(ProcessStats, write_bytes)},
   };
 
-  return ParseFromKeyValueFile(fpath, field_name_to_offset_map, reinterpret_cast<uint8_t*>(out),
-                               1 /*field_value_multipler*/);
+  return ParseFromKeyValueFile(fpath, field_name_to_offset_map, reinterpret_cast<uint8_t*>(out));
 }
 
 Status ProcParser::ParseProcStat(SystemStats* out) const {
@@ -352,27 +352,184 @@ Status ProcParser::ParseProcMemInfo(SystemStats* out) const {
 
   // clang-format off
   static absl::flat_hash_map<std::string_view, size_t> field_name_to_offset_map {
-      {"MemTotal:", offsetof(SystemStats, mem_total_bytes)},
-      {"MemFree:", offsetof(SystemStats, mem_free_bytes)},
-      {"MemAvailable:", offsetof(SystemStats, mem_available_bytes)},
-      {"Buffers:", offsetof(SystemStats, mem_buffer_bytes)},
-      {"Cached:", offsetof(SystemStats, mem_cached_bytes)},
-      {"SwapCached:", offsetof(SystemStats, mem_swap_cached_bytes)},
-      {"Active:", offsetof(SystemStats, mem_active_bytes)},
-      {"Inactive:", offsetof(SystemStats, mem_inactive_bytes)},
+      {"MemTotal", offsetof(SystemStats, mem_total_bytes)},
+      {"MemFree", offsetof(SystemStats, mem_free_bytes)},
+      {"MemAvailable", offsetof(SystemStats, mem_available_bytes)},
+      {"Buffers", offsetof(SystemStats, mem_buffer_bytes)},
+      {"Cached", offsetof(SystemStats, mem_cached_bytes)},
+      {"SwapCached", offsetof(SystemStats, mem_swap_cached_bytes)},
+      {"Active", offsetof(SystemStats, mem_active_bytes)},
+      {"Inactive", offsetof(SystemStats, mem_inactive_bytes)},
   };
   // clang-format on
 
-  // This is a key value pair with a unit (that is always KB when present).
-  constexpr int kKBToByteMultiplier = 1024;
-  return ParseFromKeyValueFile(fpath, field_name_to_offset_map, reinterpret_cast<uint8_t*>(out),
-                               kKBToByteMultiplier);
+  return ParseFromKeyValueFile(fpath, field_name_to_offset_map, reinterpret_cast<uint8_t*>(out));
+}
+
+Status ProcParser::ParseProcPIDStatus(int32_t pid, ProcessStatus* out) const {
+  /**
+   * Sample file:
+   *   Name:	vim
+   *   Umask:	0002
+   *   State:	S (sleeping)
+   * ...
+   *   TracerPid:	0
+   *   Uid:	1004	1004	1004	1004
+   *   Gid:	1004	1004	1004	1004
+   * ...
+   *   VmPeak:	   24612 kB
+   *   VmSize:	   24612 kB
+   * ...
+   */
+  CHECK(out != nullptr);
+  std::string fpath = absl::Substitute("$0/$1/status", proc_base_path_, pid);
+
+  // Just to be safe when using offsetof, make sure object is standard layout.
+  static_assert(std::is_standard_layout<ProcessStatus>::value);
+
+  // clang-format off
+  static absl::flat_hash_map<std::string_view, size_t> field_name_to_offset_map {
+      {"VmPeak", offsetof(ProcessStatus, vm_peak_bytes)},
+      {"VmSize", offsetof(ProcessStatus, vm_size_bytes)},
+      {"VmLck", offsetof(ProcessStatus, vm_lck_bytes)},
+      {"VmPin", offsetof(ProcessStatus, vm_pin_bytes)},
+      {"VmHWM", offsetof(ProcessStatus, vm_hwm_bytes)},
+      {"VmRSS", offsetof(ProcessStatus, vm_rss_bytes)},
+      {"RssAnon", offsetof(ProcessStatus, rss_anon_bytes)},
+      {"RssFile", offsetof(ProcessStatus, rss_file_bytes)},
+      {"RssShmem", offsetof(ProcessStatus, rss_shmem_bytes)},
+      {"VmData", offsetof(ProcessStatus, vm_data_bytes)},
+      {"VmStk", offsetof(ProcessStatus, vm_stk_bytes)},
+      {"VmExe", offsetof(ProcessStatus, vm_exe_bytes)},
+      {"VmLib", offsetof(ProcessStatus, vm_lib_bytes)},
+      {"VmPTE", offsetof(ProcessStatus, vm_pte_bytes)},
+      {"VmSwap", offsetof(ProcessStatus, vm_swap_bytes)},
+      {"HugetlbPages", offsetof(ProcessStatus, hugetlb_pages_bytes)},
+      {"voluntary_ctxt_switches", offsetof(ProcessStatus, voluntary_ctxt_switches)},
+      {"nonvoluntary_ctxt_switches", offsetof(ProcessStatus, nonvoluntary_ctxt_switches)},
+  };
+  // clang-format on
+
+  return ParseFromKeyValueFile(fpath, field_name_to_offset_map, reinterpret_cast<uint8_t*>(out));
+}
+
+Status ProcParser::ParseProcPIDSMaps(int32_t pid, std::vector<ProcessSMaps>* out) const {
+  CHECK(out != nullptr);
+  std::string fpath = absl::Substitute("$0/$1/smaps", proc_base_path_, pid);
+
+  // Just to be safe when using offsetof, make sure object is standard layout.
+  static_assert(std::is_standard_layout<ProcessSMaps>::value);
+
+  // clang-format off
+  static absl::flat_hash_map<std::string_view, size_t> field_name_to_offset_map {
+      {"Size", offsetof(ProcessSMaps, size_bytes)},
+      {"KernelPageSize", offsetof(ProcessSMaps, kernel_page_size_bytes)},
+      {"MMUPageSize", offsetof(ProcessSMaps, mmu_page_size_bytes)},
+      {"Rss", offsetof(ProcessSMaps, rss_bytes)},
+      {"Pss", offsetof(ProcessSMaps, pss_bytes)},
+      {"Shared_Clean", offsetof(ProcessSMaps, shared_clean_bytes)},
+      {"Shared_Dirty", offsetof(ProcessSMaps, shared_dirty_bytes)},
+      {"Private_Clean", offsetof(ProcessSMaps, private_clean_bytes)},
+      {"Private_Dirty", offsetof(ProcessSMaps, private_dirty_bytes)},
+      {"Referenced", offsetof(ProcessSMaps, referenced_bytes)},
+      {"Anonymous", offsetof(ProcessSMaps, anonymous_bytes)},
+      {"LazyFree", offsetof(ProcessSMaps, lazy_free_bytes)},
+      {"AnonHugePages", offsetof(ProcessSMaps, anon_huge_pages_bytes)},
+      {"ShmemPmdMapped", offsetof(ProcessSMaps, shmem_pmd_mapped_bytes)},
+      {"FilePmdMapped", offsetof(ProcessSMaps, file_pmd_mapped_bytes)},
+      {"Shared_Hugetlb", offsetof(ProcessSMaps, shared_hugetlb_bytes)},
+      {"Private_Hugetlb", offsetof(ProcessSMaps, private_hugetlb_bytes)},
+      {"Swap", offsetof(ProcessSMaps, swap_bytes)},
+      {"SwapPss", offsetof(ProcessSMaps, swap_pss_bytes)},
+      {"Locked", offsetof(ProcessSMaps, locked_bytes)},
+  };
+  // clang-format on
+
+  static constexpr int kProcMapNumFields = 6;
+
+  std::ifstream ifs;
+  ifs.open(fpath);
+  if (!ifs) {
+    return error::Internal("Failed to open file $0", fpath);
+  }
+
+  std::string line;
+  while (std::getline(ifs, line)) {
+    // We need to match the header lines which are of the following form:
+    // address                   perms offset   dev    inode             pathname
+    // For example:
+    // 55e816b37000-55e816b65000 r--p  00000000 103:02 55579316          /usr/bin/vim.basic
+    // We differentiate these headers from the subsequent key-value pairs that include
+    // data about the memory usage for each of the process mappings.
+    auto idx = line.find(':');
+    if (idx == std::string::npos) {
+      continue;
+    }
+    // If the character after the colon is whitespace, this is a key-value line.
+    // Else the colon is part of the device (major:minor) and this is a header.
+    // Perhaps we should look for other indicators?
+    if (idx + 1 < line.length() && !absl::ascii_isspace(line[idx + 1])) {
+      std::vector<std::string_view> split =
+          absl::StrSplit(line, absl::MaxSplits(' ', kProcMapNumFields), absl::SkipWhitespace());
+      // We might end up with 5 or 6 fields based on whether we have a pathname or not.
+      if (split.size() < kProcMapNumFields - 1) {
+        return error::Internal("Failed to parse file $0", fpath);
+      }
+      auto& smap_info = out->emplace_back();
+      smap_info.address = split[0];
+      smap_info.offset = split[2];
+      smap_info.pathname = "[anonymous]";
+      if (split.size() == kProcMapNumFields) {
+        smap_info.pathname = absl::StripAsciiWhitespace(split[kProcMapNumFields - 1]);
+      }
+      continue;
+    }
+    ParseFromKeyValueLine(line, field_name_to_offset_map, reinterpret_cast<uint8_t*>(&out->back()));
+  }
+
+  return Status::OK();
+}
+
+void ProcParser::ParseFromKeyValueLine(
+    const std::string& line,
+    const absl::flat_hash_map<std::string_view, size_t>& field_name_to_value_map,
+    uint8_t* out_base) {
+  std::vector<std::string_view> split = absl::StrSplit(line, ':', absl::SkipWhitespace());
+  if (split.size() >= 2) {
+    const auto& key = split[0];
+    const auto& val = split[1];
+
+    const auto& it = field_name_to_value_map.find(key);
+    // Key not found in map, we can just go to next iteration of loop.
+    if (it == field_name_to_value_map.end()) {
+      return;
+    }
+
+    size_t offset = it->second;
+    auto val_ptr = reinterpret_cast<int64_t*>(out_base + offset);
+
+    bool ok = false;
+    if (absl::EndsWith(val, " kB")) {
+      // Convert kB to bytes. proc seems to only use kB as the unit if it's present
+      // else there are no units.
+      const std::string_view trimmed_val = absl::StripSuffix(val, " kB");
+      ok = absl::SimpleAtoi(trimmed_val, val_ptr);
+      *val_ptr *= 1024;
+    } else {
+      ok = absl::SimpleAtoi(val, val_ptr);
+    }
+
+    if (!ok) {
+      *val_ptr = -1;
+    }
+  }
+  return;
 }
 
 Status ProcParser::ParseFromKeyValueFile(
     const std::string& fpath,
-    const absl::flat_hash_map<std::string_view, size_t>& field_name_to_value_map, uint8_t* out_base,
-    int64_t field_value_multiplier) {
+    const absl::flat_hash_map<std::string_view, size_t>& field_name_to_value_map,
+    uint8_t* out_base) {
   std::ifstream ifs;
   ifs.open(fpath);
   if (!ifs) {
@@ -382,37 +539,12 @@ Status ProcParser::ParseFromKeyValueFile(
   std::string line;
   size_t read_count = 0;
   while (std::getline(ifs, line)) {
-    std::vector<std::string_view> split = absl::StrSplit(line, " ", absl::SkipWhitespace());
-    // This is a key value pair with a unit (that is always KB when present).
-    // If the number is 0 then the units are missing so we either have 2 or 3
-    // for the width of the field.
-    const int kMemInfoMinFields = 2;
-    const int kMemInfoMaxFields = 3;
+    ParseFromKeyValueLine(line, field_name_to_value_map, out_base);
 
-    if (split.size() >= kMemInfoMinFields && split.size() <= kMemInfoMaxFields) {
-      const auto& key = split[0];
-      const auto& val = split[1];
-
-      const auto& it = field_name_to_value_map.find(key);
-      // Key not found in map, we can just go to next iteration of loop.
-      if (it == field_name_to_value_map.end()) {
-        continue;
-      }
-
-      size_t offset = it->second;
-      auto val_ptr = reinterpret_cast<int64_t*>(out_base + offset);
-      bool ok = absl::SimpleAtoi(val, val_ptr);
-      *val_ptr *= field_value_multiplier;
-
-      if (!ok) {
-        return error::Unknown("Failed to parse proc/meminfo");
-      }
-
-      // Check to see if we have read all the fields, if so we can skip the
-      // rest. We assume no duplicates.
-      if (read_count == field_name_to_value_map.size()) {
-        break;
-      }
+    // Check to see if we have read all the fields, if so we can skip the
+    // rest. We assume no duplicates.
+    if (read_count == field_name_to_value_map.size()) {
+      break;
     }
   }
 

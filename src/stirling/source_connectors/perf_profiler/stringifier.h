@@ -23,7 +23,7 @@
 
 #include "src/stirling/bpf_tools/bcc_bpf_intf/upid.h"
 #include "src/stirling/source_connectors/perf_profiler/bcc_bpf_intf/stack_event.h"
-#include "src/stirling/source_connectors/perf_profiler/symbolizer.h"
+#include "src/stirling/source_connectors/perf_profiler/symbolizers/symbolizer.h"
 
 namespace px {
 namespace stirling {
@@ -81,9 +81,10 @@ class Stringifier {
   std::string FoldedStackTraceString(const stack_trace_key_t& key);
 
  private:
-  std::string BuildStackTraceString(const std::vector<uintptr_t>& addrs, SymbolizerFn symbolize_fn,
+  std::string BuildStackTraceString(const std::vector<uintptr_t>& addrs,
+                                    profiler::SymbolizerFn symbolize_fn,
                                     const std::string_view& suffix);
-  std::string FindOrBuildStackTraceString(const int stack_id, SymbolizerFn symbolize_fn,
+  std::string FindOrBuildStackTraceString(const int stack_id, profiler::SymbolizerFn symbolize_fn,
                                           const std::string_view& suffix);
 
   // Memoized results of previous calls to FindOrBuildStackTraceString():

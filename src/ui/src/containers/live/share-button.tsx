@@ -44,9 +44,6 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
     flexGrow: 1,
     marginRight: theme.spacing(1),
   },
-  modalRoot: {
-    width: '500px',
-  },
   heading: {
     ...theme.typography.body1,
     marginBottom: theme.spacing(1),
@@ -122,7 +119,7 @@ const ShareButton = React.memo<{
       </Tooltip>
       <Dialog open={isOpen} onClose={closeDialog}>
         {/* eslint-disable-next-line react-memo/require-usememo */}
-        <DialogContent sx={{ width: '500px' }}>
+        <DialogContent sx={{ width: ({ spacing }) => spacing(62.5) /* 500px */ }}>
           <div className={modalClasses.heading}>Share Script</div>
           <ShareDialogContent classes={modalClasses} />
           <div className={modalClasses.fieldContainer}>

@@ -16,33 +16,35 @@
 
 REPOSITORY_LOCATIONS = dict(
     bazel_gazelle = dict(
-        sha256 = "222e49f034ca7a1d1231422cdb67066b885819885c356673cb1f72f748a3c9d4",
-        urls = ["https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.22.3/bazel-gazelle-v0.22.3.tar.gz"],
+        sha256 = "de69a09dc70417580aabf20a28619bb3ef60d038470c7cf8442fafcf627c21cb",
+        urls = [
+            "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.24.0/bazel-gazelle-v0.24.0.tar.gz",
+            "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.24.0/bazel-gazelle-v0.24.0.tar.gz",
+        ],
     ),
     io_bazel_rules_go = dict(
         # NOTE: Many BPF test programs are written in Go, to avoid accidentally breaking them.
         # Run the following command when upgrading Golang version:
         # scripts/sudo_bazel_run.sh //src/stirling/source_connectors/socket_tracer:http2_trace_bpf_test
         #
-        sha256 = "7c10271940c6bce577d51a075ae77728964db285dac0a46614a7934dc34303e6",
+        sha256 = "8e968b5fcea1d2d64071872b12737bbb5514524ee5f0a4f54f5920266c261acb",
         urls = [
-            "https://mirror.bazel.build/github.com/bazelbuild/rules_go" +
-            "/releases/download/v0.26.0/rules_go-v0.26.0.tar.gz",
-            "https://github.com/bazelbuild/rules_go/releases/download/v0.26.0/rules_go-v0.26.0.tar.gz",
+            "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.28.0/rules_go-v0.28.0.zip",
+            "https://github.com/bazelbuild/rules_go/releases/download/v0.28.0/rules_go-v0.28.0.zip",
         ],
     ),
     io_bazel_rules_scala = dict(
-        sha256 = "76e1abb8a54f61ada974e6e9af689c59fd9f0518b49be6be7a631ce9fa45f236",
+        sha256 = "0485168f15607ca3eab999ed531bd25596cf4a43b295552c80032ba0e056cd1a",
         urls = [
-            "https://github.com/bazelbuild/rules_scala/archive/e7a948ad1948058a7a5ddfbd9d1629d6db839933.zip",
+            "https://github.com/bazelbuild/rules_scala/archive/9d0d4f99ff79d5d454180a1c799ff1af1d380ed2.tar.gz",
         ],
-        strip_prefix = "rules_scala-e7a948ad1948058a7a5ddfbd9d1629d6db839933",
+        strip_prefix = "rules_scala-9d0d4f99ff79d5d454180a1c799ff1af1d380ed2",
     ),
     io_bazel_rules_k8s = dict(
-        sha256 = "cc75cf0d86312e1327d226e980efd3599704e01099b58b3c2fc4efe5e321fcd9",
-        strip_prefix = "rules_k8s-0.3.1",
+        sha256 = "a08850199d6900328ef899906717fb1dfcc6cde62701c63725748b2e6ca1d5d9",
+        strip_prefix = "rules_k8s-d05cbea5c56738ef02c667c10951294928a1d64a",
         urls = [
-            "https://github.com/bazelbuild/rules_k8s/releases/download/v0.3.1/rules_k8s-v0.3.1.tar.gz",
+            "https://github.com/bazelbuild/rules_k8s/archive/d05cbea5c56738ef02c667c10951294928a1d64a.tar.gz",
         ],
     ),
     com_github_apache_arrow = dict(
@@ -51,14 +53,14 @@ REPOSITORY_LOCATIONS = dict(
         urls = ["https://github.com/pixie-io/arrow/archive/ecbb9de0b4c8739347f7ffa9e7aee7e46926bbab.tar.gz"],
     ),
     com_github_bazelbuild_buildtools = dict(
-        sha256 = "a02ba93b96a8151b5d8d3466580f6c1f7e77212c4eb181cba53eb2cae7752a23",
-        strip_prefix = "buildtools-3.5.0",
-        urls = ["https://github.com/bazelbuild/buildtools/archive/3.5.0.tar.gz"],
+        sha256 = "d368c47bbfc055010f118efb2962987475418737e901f7782d2a966d1dc80296",
+        strip_prefix = "buildtools-4.2.5",
+        urls = ["https://github.com/bazelbuild/buildtools/archive/refs/tags/4.2.5.tar.gz"],
     ),
     com_google_benchmark = dict(
         sha256 = "dccbdab796baa1043f04982147e67bb6e118fe610da2c65f88912d73987e700c",
         strip_prefix = "benchmark-1.5.2",
-        urls = ["https://github.com/google/benchmark/archive/v1.5.2.tar.gz"],
+        urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.5.2.tar.gz"],
     ),
     com_github_packetzero_dnsparser = dict(
         sha256 = "bdf6c7f56f33725c1c32e672a4779576fb639dd2df565115778eb6be48296431",
@@ -73,20 +75,12 @@ REPOSITORY_LOCATIONS = dict(
     bazel_skylib = dict(
         sha256 = "e5d90f0ec952883d56747b7604e2a15ee36e288bb556c3d0ed33e818a4d971f2",
         strip_prefix = "bazel-skylib-1.0.2",
-        urls = ["https://github.com/bazelbuild/bazel-skylib/archive/1.0.2.tar.gz"],
+        urls = ["https://github.com/bazelbuild/bazel-skylib/archive/refs/tags/1.0.2.tar.gz"],
     ),
     io_bazel_rules_docker = dict(
-        sha256 = "4349f2b0b45c860dd2ffe18802e9f79183806af93ce5921fb12cbd6c07ab69a8",
-        strip_prefix = "rules_docker-0.21.0",
-        urls = ["https://github.com/bazelbuild/rules_docker/archive/v0.21.0.tar.gz"],
-    ),
-    io_bazel_toolchains = dict(
-        sha256 = "e2126599d29f2028e6b267eba273dcc8e7f4a35ff323e9600cf42fb03875b7c6",
-        strip_prefix = "bazel-toolchains-2.0.0",
-        urls = [
-            "https://mirror.bazel.build/github.com/bazelbuild/bazel-toolchains/archive/2.0.0.tar.gz",
-            "https://github.com/bazelbuild/bazel-toolchains/archive/2.0.0.tar.gz",
-        ],
+        sha256 = "59536e6ae64359b716ba9c46c39183403b01eabfbd57578e84398b4829ca499a",
+        strip_prefix = "rules_docker-0.22.0",
+        urls = ["https://github.com/bazelbuild/rules_docker/archive/refs/tags/v0.22.0.tar.gz"],
     ),
     com_google_googletest = dict(
         sha256 = "9dc9157a9a1551ec7a7e43daea9a694a0bb5fb8bec81235d8a1e6ef64c716dcb",
@@ -96,7 +90,7 @@ REPOSITORY_LOCATIONS = dict(
     com_github_grpc_grpc = dict(
         sha256 = "27dd2fc5c9809ddcde8eb6fa1fa278a3486566dfc28335fca13eb8df8bd3b958",
         strip_prefix = "grpc-1.35.0",
-        urls = ["https://github.com/grpc/grpc/archive/v1.35.0.tar.gz"],
+        urls = ["https://github.com/grpc/grpc/archive/refs/tags/v1.35.0.tar.gz"],
     ),
     com_google_boringssl = dict(
         sha256 = "781fa39693ec2984c71213cd633e9f6589eaaed75e3a9ac413237edec96fd3b9",
@@ -110,40 +104,41 @@ REPOSITORY_LOCATIONS = dict(
         urls = ["https://github.com/gflags/gflags/archive/524b83d0264cb9f1b2d134c564ef1aa23f207a41.tar.gz"],
     ),
     com_github_google_glog = dict(
-        sha256 = "51992e76446e384643e474b15d11a3937d2eb9e82c3f546360dfa48e96a0684c",
-        # Nov 9, 2019.
-        strip_prefix = "glog-1863b4228c85dd88885695476e943a1d5758f8ab",
-        urls = ["https://github.com/google/glog/archive/1863b4228c85dd88885695476e943a1d5758f8ab.tar.gz"],
+        sha256 = "95dc9dd17aca4e12e2cb18087a5851001f997682f5f0d0c441a5be3b86f285bd",
+        strip_prefix = "glog-bc1fada1cf63ad12aee26847ab9ed4c62cffdcf9",
+        # We cannot use the last released version due to https://github.com/google/glog/pull/706
+        # Once there is a realease that includes that fix, we can switch to a released version.
+        urls = ["https://github.com/google/glog/archive/bc1fada1cf63ad12aee26847ab9ed4c62cffdcf9.tar.gz"],
     ),
     com_github_rlyeh_sole = dict(
         sha256 = "ff82a1d6071cbc9c709864266210ddedecdb2b1e507ac5e7c4290ca6453e89b3",
         strip_prefix = "sole-1.0.2",
-        urls = ["https://github.com/r-lyeh-archived/sole/archive/1.0.2.tar.gz"],
+        urls = ["https://github.com/r-lyeh-archived/sole/archive/refs/tags/1.0.2.tar.gz"],
     ),
     com_google_absl = dict(
-        sha256 = "af4bcd1a5a2710216931cb6ee1b6b6e814490082d56b3230beede8a954f7995d",
-        strip_prefix = "abseil-cpp-fb7dd24b18e82893e5922be5d1c8ae0f3fe3c9fa",
-        urls = ["https://github.com/abseil/abseil-cpp/archive/fb7dd24b18e82893e5922be5d1c8ae0f3fe3c9fa.tar.gz"],
+        sha256 = "dcf71b9cba8dc0ca9940c4b316a0c796be8fab42b070bb6b7cab62b48f0e66c4",
+        strip_prefix = "abseil-cpp-20211102.0",
+        urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20211102.0.tar.gz"],
     ),
     com_google_flatbuffers = dict(
-        sha256 = "b2bb0311ca40b12ebe36671bdda350b10c7728caf0cfe2d432ea3b6e409016f3",
-        strip_prefix = "flatbuffers-1f5eae5d6a135ff6811724f6c57f911d1f46bb15",
-        urls = ["https://github.com/google/flatbuffers/archive/1f5eae5d6a135ff6811724f6c57f911d1f46bb15.tar.gz"],
+        sha256 = "9ddb9031798f4f8754d00fca2f1a68ecf9d0f83dfac7239af1311e4fd9a565c4",
+        strip_prefix = "flatbuffers-2.0.0",
+        urls = ["https://github.com/google/flatbuffers/archive/refs/tags/v2.0.0.tar.gz"],
     ),
     com_google_double_conversion = dict(
-        sha256 = "2d589cbdcde9c8e611ecfb8cc570715a618d3c2503fa983f87ac88afac68d1bf",
-        strip_prefix = "double-conversion-4199ef3d456ed0549e5665cf4186f0ee6210db3b",
-        urls = ["https://github.com/google/double-conversion/archive/4199ef3d456ed0549e5665cf4186f0ee6210db3b.tar.gz"],
+        sha256 = "3dbcdf186ad092a8b71228a5962009b5c96abde9a315257a3452eb988414ea3b",
+        strip_prefix = "double-conversion-3.2.0",
+        urls = ["https://github.com/google/double-conversion/archive/refs/tags/v3.2.0.tar.gz"],
     ),
     com_google_protobuf = dict(
         sha256 = "bc3dbf1f09dba1b2eb3f2f70352ee97b9049066c9040ce0c9b67fb3294e91e4b",
         strip_prefix = "protobuf-3.15.5",
-        urls = ["https://github.com/protocolbuffers/protobuf/archive/v3.15.5.tar.gz"],
+        urls = ["https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.15.5.tar.gz"],
     ),
     com_intel_tbb = dict(
         sha256 = "ebc4f6aa47972daed1f7bf71d100ae5bf6931c2e3144cf299c8cc7d041dca2f3",
         strip_prefix = "oneTBB-2020.3",
-        urls = ["https://github.com/oneapi-src/oneTBB/archive/v2020.3.tar.gz"],
+        urls = ["https://github.com/oneapi-src/oneTBB/archive/refs/tags/v2020.3.tar.gz"],
     ),
     com_github_libarchive_libarchive = dict(
         sha256 = "b60d58d12632ecf1e8fad7316dc82c6b9738a35625746b47ecdcaf4aed176176",
@@ -168,7 +163,7 @@ REPOSITORY_LOCATIONS = dict(
     rules_foreign_cc = dict(
         sha256 = "1df78c7d7eed2dc21b8b325a2853c31933a81e7b780f9a59a5d078be9008b13a",
         strip_prefix = "rules_foreign_cc-0.7.0",
-        urls = ["https://github.com/bazelbuild/rules_foreign_cc/archive/0.7.0.tar.gz"],
+        urls = ["https://github.com/bazelbuild/rules_foreign_cc/archive/refs/tags/0.7.0.tar.gz"],
     ),
     com_github_gperftools_gperftools = dict(
         sha256 = "ea566e528605befb830671e359118c2da718f721c27225cbbc93858c7520fee3",
@@ -194,58 +189,47 @@ REPOSITORY_LOCATIONS = dict(
     com_github_libuv_libuv = dict(
         sha256 = "371e5419708f6aaeb8656671f89400b92a9bba6443369af1bb70bcd6e4b3c764",
         strip_prefix = "libuv-1.42.0",
-        urls = ["https://github.com/libuv/libuv/archive/v1.42.0.tar.gz"],
+        urls = ["https://github.com/libuv/libuv/archive/refs/tags/v1.42.0.tar.gz"],
     ),
     com_github_cameron314_concurrentqueue = dict(
-        sha256 = "dde227e8fd561b46bdb3c211fa843adc543227b30607acf8eff049006cdffcd1",
-        strip_prefix = "concurrentqueue-dea078cf5b6e742cd67a0d725e36f872feca4de4",
-        urls = ["https://github.com/cameron314/concurrentqueue/" +
-                "archive/dea078cf5b6e742cd67a0d725e36f872feca4de4.tar.gz"],
-    ),
-    # June 14, 2019.
-    com_github_nghttp2_nghttp2 = dict(
-        sha256 = "863e366c530d09d7cebce67c6d7449bdb85bccb5ae0ecff84295a80697a6c989",
-        strip_prefix = "nghttp2-ee4431344511886efc66395a38b9bf5dddd7151b",
-        urls = ["https://github.com/nghttp2/nghttp2/archive/ee4431344511886efc66395a38b9bf5dddd7151b.tar.gz"],
+        sha256 = "eb37336bf9ae59aca7b954db3350d9b30d1cab24b96c7676f36040aa76e915e8",
+        strip_prefix = "concurrentqueue-1.0.3",
+        urls = ["https://github.com/cameron314/concurrentqueue/archive/refs/tags/v1.0.3.tar.gz"],
     ),
     com_github_neargye_magic_enum = dict(
         sha256 = "4fe6627407a656d0d73879c0346b251ccdcfb718c37bef5410ba172c7c7d5f9a",
         strip_prefix = "magic_enum-0.7.0",
-        urls = ["https://github.com/Neargye/magic_enum/archive/v0.7.0.tar.gz"],
+        urls = ["https://github.com/Neargye/magic_enum/archive/refs/tags/v0.7.0.tar.gz"],
     ),
     com_github_arun11299_cpp_jwt = dict(
         sha256 = "6dbf93969ec48d97ecb6c157014985846df8c01995a0011c21f4e2c146594922",
         strip_prefix = "cpp-jwt-1.1.1",
-        urls = ["https://github.com/arun11299/cpp-jwt/archive/v1.1.1.tar.gz"],
+        urls = ["https://github.com/arun11299/cpp-jwt/archive/refs/tags/v1.1.1.tar.gz"],
     ),
-    # April 21, 2020.
     com_github_cyan4973_xxhash = dict(
         sha256 = "952ebbf5b11fbf59ae5d760a562d1e9112278f244340ad7714e8556cbe54f7f7",
         strip_prefix = "xxHash-0.7.3",
-        urls = ["https://github.com/Cyan4973/xxHash/archive/v0.7.3.tar.gz"],
+        urls = ["https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.7.3.tar.gz"],
     ),
     com_github_nlohmann_json = dict(
         sha256 = "87b5884741427220d3a33df1363ae0e8b898099fbc59f1c451113f6732891014",
         urls = ["https://github.com/nlohmann/json/releases/download/v3.7.3/include.zip"],
     ),
-    # August 18, 2020.
     org_tensorflow = dict(
         sha256 = "f681331f8fc0800883761c7709d13cda11942d4ad5ff9f44ad855e9dc78387e0",
         strip_prefix = "tensorflow-2.4.1",
-        urls = ["https://github.com/tensorflow/tensorflow/archive/v2.4.1.tar.gz"],
+        urls = ["https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.4.1.tar.gz"],
     ),
     io_bazel_rules_closure = dict(
-        sha256 = "5b00383d08dd71f28503736db0500b6fb4dda47489ff5fc6bed42557c07c6ba9",
-        strip_prefix = "rules_closure-308b05b2419edb5c8ee0471b67a40403df940149",
-        urls = [
-            "https://github.com/bazelbuild/rules_closure/archive/308b05b2419edb5c8ee0471b67a40403df940149.tar.gz",
-        ],
+        sha256 = "9498e57368efb82b985db1ed426a767cbf1ba0398fd7aed632fc3908654e1b1e",
+        strip_prefix = "rules_closure-0.12.0",
+        urls = ["https://github.com/bazelbuild/rules_closure/archive/refs/tags/0.12.0.tar.gz"],
     ),
     # August 19, 2020.
     com_github_google_sentencepiece = dict(
         sha256 = "1c0bd83e03f71a10fc934b7ce996e327488b838587f03159fd392c77c7701389",
         strip_prefix = "sentencepiece-0.1.95",
-        urls = ["https://github.com/google/sentencepiece/archive/v0.1.95.tar.gz"],
+        urls = ["https://github.com/google/sentencepiece/archive/refs/tags/v0.1.95.tar.gz"],
     ),
     rules_python = dict(
         urls = ["https://github.com/bazelbuild/rules_python/releases/download/0.2.0/rules_python-0.2.0.tar.gz"],
@@ -307,13 +291,13 @@ REPOSITORY_LOCATIONS = dict(
         sha256 = "07018db604ea3e61f5078583e87c80932ea10c300d979061490ee1b7dc8e3a41",
     ),
     com_github_USCiLab_cereal = dict(
-        urls = ["https://github.com/USCiLab/cereal/archive/af0700efb25e7dc7af637b9e6f970dbb94813bff.tar.gz"],
-        strip_prefix = "cereal-af0700efb25e7dc7af637b9e6f970dbb94813bff",
-        sha256 = "6b8e8975400a84eed20dcf4490f1b16efaadbbad6d1b5ffcc5e1da3e5be1c324",
+        urls = ["https://github.com/USCiLab/cereal/archive/refs/tags/v1.3.1.tar.gz"],
+        strip_prefix = "cereal-1.3.1",
+        sha256 = "65ea6ddda98f4274f5c10fb3e07b2269ccdd1e5cbb227be6a2fd78b8f382c976",
     ),
     rules_jvm_external = dict(
-        urls = ["https://github.com/bazelbuild/rules_jvm_external/archive/4.2.zip"],
-        sha256 = "cd1a77b7b02e8e008439ca76fd34f5b07aecb8c752961f9640dea15e9e5ba1ca",
+        urls = ["https://github.com/bazelbuild/rules_jvm_external/archive/refs/tags/4.2.tar.gz"],
+        sha256 = "2cd77de091e5376afaf9cc391c15f093ebd0105192373b334f0a855d89092ad5",
         strip_prefix = "rules_jvm_external-4.2",
     ),
 )
@@ -325,11 +309,12 @@ REPOSITORY_LOCATIONS = dict(
 # To use a local repo for local development, change `remote` to a file path.
 #   ex: remote = "/home/user/src/pixie-io/bcc"
 # Then change the local repo, commit the change, and replace `commit` with your new commit.
+# See LOCAL_REPOSITORY_LOCATIONS for an alternative approach.
 GIT_REPOSITORY_LOCATIONS = dict(
     com_github_iovisor_bcc = dict(
         remote = "https://github.com/pixie-io/bcc.git",
-        commit = "649670959a0e7376358d4c8e455cfd5c75321d53",
-        shallow_since = "1635525770 -0700",
+        commit = "f55c4deb76aaf483a50fcf7dff30e9076ef42b99",
+        shallow_since = "1643059595 -0800",
     ),
     com_github_iovisor_bpftrace = dict(
         remote = "https://github.com/pixie-io/bpftrace.git",
@@ -340,5 +325,22 @@ GIT_REPOSITORY_LOCATIONS = dict(
         remote = "https://github.com/pixie-io/jattach.git",
         commit = "fa36a4fa141b4e9486b9126640d54a94c1d36fce",
         shallow_since = "1638898188 -0800",
+    ),
+)
+
+# To use a local repo for local development, update the path to point to your local repo.
+#   ex: path = "/home/user/pixie-io/bcc"
+# then uncomment the lines with `_local_repo(name_of_repo_you_care_about, ...)` in `repositories.bzl` and
+# comment out the corresponding lines with `_git_repo(name_of_repo_you_care_about, ...)`.
+# Note that if you do this, you have to handle the building of these repos' artifacts yourself.
+# See `bazel/external/local_dev` for more info about the right cmake commands for building these repos yourself.
+# WARNING: doing this has some downsides, so don't do it for production builds. For instance,
+# cflags and other settings set by bazel (eg -O3) won't be used, since you have to do the building manually.
+LOCAL_REPOSITORY_LOCATIONS = dict(
+    com_github_iovisor_bcc = dict(
+        path = "/home/user/pixie-io/bcc",
+    ),
+    com_github_iovisor_bpftrace = dict(
+        path = "/home/user/pixie-io/bpftrace",
     ),
 )

@@ -47,7 +47,7 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
     fontSize: theme.typography.caption.fontSize,
     color: theme.palette.foreground.grey1,
   },
-  link: { color: theme.palette.info.main },
+  link: { color: theme.palette.graph.ramp[1] },
   errorRow: {
     borderRadius: theme.shape.borderRadius,
     fontWeight: theme.typography.fontWeightBold,
@@ -57,7 +57,7 @@ const useStyles = makeStyles((theme: Theme) => createStyles({
     padding: theme.spacing(2),
     marginTop: theme.spacing(4),
   },
-}));
+}), { name: 'HydraInvitationForm' });
 
 // eslint-disable-next-line react-memo/require-memo
 export const HydraInvitationForm: React.FC = () => {

@@ -42,9 +42,11 @@ using ::testing::SizeIs;
 using ::testing::UnorderedElementsAre;
 
 //-----------------------------------------------------------------------------
-// Test Class and Test Cases
+// HTTP2TraceTest
 //-----------------------------------------------------------------------------
 
+// Test is templated so it can use Go 1.16 or 1.17 versions of client/server.
+template <typename TClientServerContainers>
 class HTTP2TraceTest : public testing::SocketTraceBPFTest</* TClientSideTracing */ false> {
  protected:
   HTTP2TraceTest() {
@@ -54,28 +56,45 @@ class HTTP2TraceTest : public testing::SocketTraceBPFTest</* TClientSideTracing 
     PL_CHECK_OK(server_.Run(std::chrono::seconds{60}));
   }
 
-  ::px::stirling::testing::GRPCServerContainer server_;
-  ::px::stirling::testing::GRPCClientContainer client_;
+  typename TClientServerContainers::ServerContainer server_;
+  typename TClientServerContainers::ClientContainer client_;
 };
 
-TEST_F(HTTP2TraceTest, Basic) {
-  StartTransferDataThread();
+struct Go1_16GRPCClientServerContainers {
+  using ServerContainer = ::px::stirling::testing::Go1_16_GRPCServerContainer;
+  using ClientContainer = ::px::stirling::testing::Go1_16_GRPCClientContainer;
+};
+
+struct Go1_17GRPCClientServerContainers {
+  using ServerContainer = ::px::stirling::testing::Go1_17_GRPCServerContainer;
+  using ClientContainer = ::px::stirling::testing::Go1_17_GRPCClientContainer;
+};
+
+// Use a typed test to run the test for both Go 1.16 and Go 1.17.
+typedef ::testing::Types<Go1_16GRPCClientServerContainers, Go1_17GRPCClientServerContainers>
+    GoVersions;
+TYPED_TEST_SUITE(HTTP2TraceTest, GoVersions);
+
+TYPED_TEST(HTTP2TraceTest, Basic) {
+  this->StartTransferDataThread();
 
   // Run the client in the network of the server, so they can connect to each other.
-  PL_CHECK_OK(client_.Run(std::chrono::seconds{10},
-                          {absl::Substitute("--network=container:$0", server_.container_name())}));
-  client_.Wait();
+  PL_CHECK_OK(this->client_.Run(
+      std::chrono::seconds{10},
+      {absl::Substitute("--network=container:$0", this->server_.container_name())}));
+  this->client_.Wait();
 
-  StopTransferDataThread();
+  this->StopTransferDataThread();
 
   {
     // Grab the data from Stirling.
-    std::vector<TaggedRecordBatch> tablets = ConsumeRecords(SocketTraceConnector::kHTTPTableNum);
+    std::vector<TaggedRecordBatch> tablets =
+        this->ConsumeRecords(SocketTraceConnector::kHTTPTableNum);
     ASSERT_FALSE(tablets.empty());
     types::ColumnWrapperRecordBatch rb = tablets[0].records;
 
     const std::vector<size_t> target_record_indices =
-        FindRecordIdxMatchesPID(rb, kHTTPUPIDIdx, server_.process_pid());
+        FindRecordIdxMatchesPID(rb, kHTTPUPIDIdx, this->server_.process_pid());
 
     // For Debug:
     for (const auto& idx : target_record_indices) {
@@ -104,9 +123,13 @@ TEST_F(HTTP2TraceTest, Basic) {
 
     EXPECT_THAT(records, Contains(EqHTTPRecord(expected_record)));
 
-    EXPECT_THAT(FindRecordIdxMatchesPID(rb, kHTTPUPIDIdx, client_.process_pid()), IsEmpty());
+    EXPECT_THAT(FindRecordIdxMatchesPID(rb, kHTTPUPIDIdx, this->client_.process_pid()), IsEmpty());
   }
 }
+
+//-----------------------------------------------------------------------------
+// ProductCatalogServiceTraceTest
+//-----------------------------------------------------------------------------
 
 class ProductCatalogServiceTraceTest
     : public testing::SocketTraceBPFTest</* TClientSideTracing */ false> {

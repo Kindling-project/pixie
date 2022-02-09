@@ -45,7 +45,10 @@ namespace protocols {
  */
 class DataStreamBuffer {
  public:
-  explicit DataStreamBuffer(size_t max_capacity) : capacity_(max_capacity) {}
+  DataStreamBuffer(size_t max_capacity, size_t max_gap_size, size_t allow_before_gap_size)
+      : capacity_(max_capacity),
+        max_gap_size_(max_gap_size),
+        allow_before_gap_size_(allow_before_gap_size) {}
 
   /**
    * Adds data to the buffer at the specified logical position.
@@ -115,6 +118,13 @@ class DataStreamBuffer {
    */
   void Reset();
 
+  /**
+   * Shrink the internal buffer, so that the allocated memory matches its size.
+   * Note this has to be an external API, because `RemovePrefix` is called in situations where it
+   * doesn't make sense to shrink.
+   */
+  void ShrinkToFit() { buffer_.shrink_to_fit(); }
+
  private:
   std::map<size_t, size_t>::const_iterator GetChunkForPos(size_t pos) const;
   void AddNewChunk(size_t pos, size_t size);
@@ -126,7 +136,12 @@ class DataStreamBuffer {
   // Umbrella that calls CleanupTimestamps and CleanupChunks.
   void CleanupMetadata();
 
+  // Get the end of valid data in the buffer.
+  size_t EndPosition();
+
   const size_t capacity_;
+  const size_t max_gap_size_;
+  const size_t allow_before_gap_size_;
 
   // Logical position of data stream buffer.
   // In other words, the position of buffer_[0].

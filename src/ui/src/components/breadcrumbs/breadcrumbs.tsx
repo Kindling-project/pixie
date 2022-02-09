@@ -60,18 +60,12 @@ const useStyles = makeStyles(({
     fontWeight: typography.fontWeightMedium,
     paddingRight: spacing(0.5),
     paddingLeft: spacing(0.5),
-    fontFamily: '"Roboto Mono", Monospace',
-  },
-  card: {
-    width: '608px',
-  },
-  autocomplete: {
-    maxHeight: '60vh',
+    fontFamily: typography.monospace.fontFamily,
   },
   value: {
     color: palette.primary.main,
     whiteSpace: 'nowrap',
-    fontFamily: '"Roboto Mono", Monospace',
+    fontFamily: typography.monospace.fontFamily,
     maxWidth: spacing(50),
     overflowX: 'hidden',
     textOverflow: 'ellipsis',
@@ -98,75 +92,6 @@ const useStyles = makeStyles(({
   },
   spacer: {
     width: spacing(2),
-  },
-  input: {
-    padding: `0 ${spacing(1)}px ${spacing(1)}px ${spacing(1)}px`,
-  },
-  completionsContainer: {
-    // 80% as wide as the Command Input, and using 80% of the fontSize and 80% of the spacing
-    maxWidth: '608px',
-    maxHeight: '60vh',
-  },
-  // CSS for the front/back of the breadcrumb element.
-  triangle: {
-    position: 'absolute',
-    height: spacing(3),
-    width: spacing(3),
-    overflow: 'hidden',
-  },
-  angle: {
-    float: 'right', // Take the triangle out of the DOM, so it can overlap with other breadcrumbs.
-  },
-  tail: {
-    width: spacing(2.4),
-    height: spacing(3),
-  },
-  topArrow: {
-    position: 'absolute',
-    width: spacing(3),
-    height: spacing(3),
-    top: spacing(-1.5),
-    right: spacing(-1.6),
-    background: palette.foreground.grey3,
-    transform: 'rotate(45deg)',
-    borderRadius: spacing(0.4),
-  },
-  bottomArrow: {
-    position: 'absolute',
-    width: spacing(3),
-    height: spacing(3),
-    bottom: spacing(-1.5),
-    right: spacing(-1.6),
-    background: palette.foreground.grey3,
-    transform: 'rotate(45deg)',
-    borderRadius: spacing(0.4),
-  },
-  arrow: {
-    position: 'absolute',
-    width: spacing(3),
-    height: spacing(3),
-    left: spacing(-1.5),
-    background: palette.foreground.grey3,
-    transform: 'rotate(45deg)',
-    borderRadius: spacing(0.4),
-  },
-  inputItem: {
-    '&:hover': {
-      backgroundColor: 'initial',
-    },
-    '&.Mui-focusVisible': {
-      backgroundColor: 'initial',
-    },
-  },
-  separator: {
-    display: 'flex',
-    alignItems: 'center',
-    color: palette.foreground.one,
-    fontWeight: 1000,
-    width: spacing(1),
-  },
-  icon: {
-    minWidth: spacing(4),
   },
   divider: {
     display: 'flex',
@@ -199,14 +124,13 @@ const themeCompactor = (theme: Theme) => ({
 
 const useDialogStyles = makeStyles((theme: Theme) => createStyles({
   card: {
-    width: '608px',
+    width: theme.spacing(76), // 608px
   },
   autocomplete: {
     maxHeight: '60vh',
   },
   completionsContainer: {
-    // 608px is 80% as wide as the Command Input; fontSize and spacing are reduced similarly.
-    maxWidth: 'min(95vw, min(auto, 608px))',
+    maxWidth: `min(95vw, min(auto, ${theme.spacing(76)}px))`,
     maxHeight: '60vh',
   },
   explanationContainer: {

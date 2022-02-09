@@ -373,7 +373,11 @@ Status PopulateHTTP2DebugSymbols(DwarfReader* dwarf_reader, std::string_view ven
     std::string fn = VENDOR_SYMBOL("golang.org/x/net/http2/hpack.(*Encoder).WriteField");
     auto args_map = dwarf_reader->GetFunctionArgInfo(fn).ValueOr(kEmptyMap);
     LOG_ASSIGN(symaddrs->WriteField_e_loc, GetArgOffset(args_map, "e"));
-    LOG_ASSIGN(symaddrs->WriteField_f_loc, GetArgOffset(args_map, "f"));
+    LOG_ASSIGN(symaddrs->WriteField_f_name_loc, GetArgOffset(args_map, "f"));
+    symaddrs->WriteField_f_name_loc.offset += 0;
+
+    LOG_ASSIGN(symaddrs->WriteField_f_value_loc, GetArgOffset(args_map, "f"));
+    symaddrs->WriteField_f_value_loc.offset += 16;
   }
 
   // Arguments of net/http.(*http2serverConn).processHeaders.
@@ -521,6 +525,7 @@ StatusOr<uint64_t> GetOpenSSLVersionNumUsingDLOpen(const std::filesystem::path& 
     return error::Internal("Failed to dlopen OpenSSL so file: $0, $1", lib_openssl_path.string(),
                            dlerror());
   }
+  DEFER(dlclose(h));
 
   const std::string version_num_symbol = "OpenSSL_version_num";
 
@@ -528,7 +533,6 @@ StatusOr<uint64_t> GetOpenSSLVersionNumUsingDLOpen(const std::filesystem::path& 
   PL_ASSIGN_OR_RETURN(auto version_num_f, DLSymbolToFptr<unsigned long()>(h, version_num_symbol));
 
   const uint64_t version_num = version_num_f();
-  dlclose(h);
   return version_num;
 }
 

@@ -19,6 +19,7 @@
 import * as React from 'react';
 
 import { useQuery, gql } from '@apollo/client';
+import { Theme } from '@mui/material/styles';
 import { createStyles, makeStyles } from '@mui/styles';
 import { useLDClient } from 'launchdarkly-react-client-sdk';
 import * as QueryString from 'query-string';
@@ -46,13 +47,13 @@ import { DeployInstructions } from './deploy-instructions';
 import { LiveContextRouter } from './live-routing';
 import { RouteNotFound } from './route-not-found';
 
-const useStyles = makeStyles(() => createStyles({
+const useStyles = makeStyles((theme: Theme) => createStyles({
   banner: {
     position: 'absolute',
     width: '100%',
     textAlign: 'center',
     top: 0,
-    zIndex: 1500, // TopBar has a z-index of 1300.
+    zIndex: theme.zIndex.appBar + 1,
     color: 'white',
     background: 'rgba(220,0,0,0.5)',
   },
@@ -116,6 +117,7 @@ const ScriptShortcut = ({ match, location }) => {
     gql`
       query listClustersForConvenienceRoutes {
         clusters {
+          id
           clusterName
           status
         }
@@ -195,6 +197,7 @@ export default function PixieWithContext(): React.ReactElement {
   }>(gql`
     query userInfoForContext{
       user {
+        id
         orgName
         email
       }
@@ -211,6 +214,7 @@ export default function PixieWithContext(): React.ReactElement {
     gql`
       query getSettingsForCurrentUser{
         userSettings {
+          id
           analyticsOptout
         }
       }

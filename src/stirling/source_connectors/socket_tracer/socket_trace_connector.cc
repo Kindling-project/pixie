@@ -18,6 +18,7 @@
 
 #include "src/stirling/source_connectors/socket_tracer/socket_trace_connector.h"
 
+#include <sys/sysinfo.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -58,11 +59,13 @@ DEFINE_uint32(
 DEFINE_bool(stirling_enable_periodic_bpf_map_cleanup, true,
             "Disable periodic BPF map cleanup (for testing)");
 
-DEFINE_int32(test_only_socket_trace_target_pid, kTraceAllTGIDs, "The process to trace.");
+DEFINE_int32(test_only_socket_trace_target_pid, kTraceAllTGIDs,
+             "The PID of a process to trace. This forces BPF to export events by ignoring event "
+             "filtering. The purpose is to observe the underlying raw events for debugging.");
 // TODO(yzhao): If we ever need to write all events from different perf buffers, then we need either
 // write to different files for individual perf buffers, or create a protobuf message with an oneof
 // field to include all supported message types.
-DEFINE_string(perf_buffer_events_output_path, "",
+DEFINE_string(socket_trace_data_events_output_path, "",
               "If not empty, specifies the path & format to a file to which the socket tracer "
               "writes data events. If the filename ends with '.bin', the events are serialized in "
               "binary format; otherwise, text format.");
@@ -86,18 +89,44 @@ DEFINE_bool(stirling_enable_nats_tracing, true,
             "If true, stirling will trace and process NATS messages.");
 DEFINE_bool(stirling_enable_kafka_tracing, true,
             "If true, stirling will trace and process Kafka messages.");
-DEFINE_bool(stirling_enable_mux_tracing, false,
+DEFINE_bool(stirling_enable_mux_tracing,
+            gflags::BoolFromEnv("PL_STIRLING_TRACER_ENABLE_MUX", false),
             "If true, stirling will trace and process Mux messages.");
 
 DEFINE_bool(stirling_disable_self_tracing, true,
             "If true, stirling will not trace and process syscalls made by itself.");
 
-DEFINE_uint32(messages_expiration_duration_secs, 10 * 60,
-              "The duration for which a cached message to be erased.");
+// Assume a moderate default network bandwidth peak of 100MiB/s across socket connections for data.
+DEFINE_uint32(stirling_socket_tracer_target_data_bw_percpu, 100 * 1024 * 1024,
+              "Target bytes/sec of data per CPU");
+
+// Assume a default of 5MiB/s across socket connections for control events.
+DEFINE_uint32(stirling_socket_tracer_target_control_bw_percpu, 5 * 1024 * 1024,
+              "Target bytes/sec of control events per CPU");
+
+DEFINE_double(
+    stirling_socket_tracer_percpu_bw_scaling_factor, 8,
+    "Per CPU scaling factor to apply to perf buffers, with the formula "
+    "(1+x)/(ncpus+x), where x is the value of this flag. "
+    "A value of infinity means each CPU's perf buffer is sized to handle the target BW. "
+    "A value of 0 means each CPU's perf buffer is sized to handle a 1/ncpu * target BW. "
+    "Values in between trade-off between these two extremes in a way that prunes back "
+    "memory usage more aggressively for high core counts. "
+    "8 is the default to curb memory use in perf buffers for CPUs with high core counts.");
+
+DEFINE_uint32(messages_expiry_duration_secs, 1 * 60,
+              "The duration after which a parsed message is erased.");
 DEFINE_uint32(messages_size_limit_bytes, 1024 * 1024,
               "The limit of the size of the parsed messages, not the BPF events, "
               "for each direction, of each connection tracker. "
-              "All cached messages are erased if this limit is breached.");
+              "All stored messages are erased if this limit is breached.");
+
+DEFINE_uint32(
+    datastream_buffer_expiry_duration_secs, 10,
+    "The duration after which a buffer will be cleared if there is no progress in the parser.");
+DEFINE_uint32(datastream_buffer_retention_size,
+              gflags::Uint32FromEnv("PL_DATASTREAM_BUFFER_SIZE", 1024 * 1024),
+              "The maximum size of a data stream buffer retained between cycles.");
 
 BPF_SRC_STRVIEW(socket_trace_bcc_script, socket_trace);
 
@@ -189,37 +218,104 @@ void SocketTraceConnector::InitProtocolTransferSpecs() {
   }
 }
 
-Status SocketTraceConnector::InitImpl() {
-  sampling_freq_mgr_.set_period(kSamplingPeriod);
-  push_freq_mgr_.set_period(kPushPeriod);
+using ProbeType = bpf_tools::BPFProbeAttachType;
+const auto kProbeSpecs = MakeArray<bpf_tools::KProbeSpec>(
+    {{"connect", ProbeType::kEntry, "syscall__probe_entry_connect"},
+     {"connect", ProbeType::kReturn, "syscall__probe_ret_connect"},
+     {"accept", ProbeType::kEntry, "syscall__probe_entry_accept"},
+     {"accept", ProbeType::kReturn, "syscall__probe_ret_accept"},
+     {"accept4", ProbeType::kEntry, "syscall__probe_entry_accept4"},
+     {"accept4", ProbeType::kReturn, "syscall__probe_ret_accept4"},
+     {"write", ProbeType::kEntry, "syscall__probe_entry_write"},
+     {"write", ProbeType::kReturn, "syscall__probe_ret_write"},
+     {"writev", ProbeType::kEntry, "syscall__probe_entry_writev"},
+     {"writev", ProbeType::kReturn, "syscall__probe_ret_writev"},
+     {"send", ProbeType::kEntry, "syscall__probe_entry_send"},
+     {"send", ProbeType::kReturn, "syscall__probe_ret_send"},
+     {"sendto", ProbeType::kEntry, "syscall__probe_entry_sendto"},
+     {"sendto", ProbeType::kReturn, "syscall__probe_ret_sendto"},
+     {"sendmsg", ProbeType::kEntry, "syscall__probe_entry_sendmsg"},
+     {"sendmsg", ProbeType::kReturn, "syscall__probe_ret_sendmsg"},
+     {"sendmmsg", ProbeType::kEntry, "syscall__probe_entry_sendmmsg"},
+     {"sendmmsg", ProbeType::kReturn, "syscall__probe_ret_sendmmsg"},
+     {"sendfile", ProbeType::kEntry, "syscall__probe_entry_sendfile"},
+     {"sendfile", ProbeType::kReturn, "syscall__probe_ret_sendfile"},
+     {"sendfile64", ProbeType::kEntry, "syscall__probe_entry_sendfile"},
+     {"sendfile64", ProbeType::kReturn, "syscall__probe_ret_sendfile"},
+     {"read", ProbeType::kEntry, "syscall__probe_entry_read"},
+     {"read", ProbeType::kReturn, "syscall__probe_ret_read"},
+     {"readv", ProbeType::kEntry, "syscall__probe_entry_readv"},
+     {"readv", ProbeType::kReturn, "syscall__probe_ret_readv"},
+     {"recv", ProbeType::kEntry, "syscall__probe_entry_recv"},
+     {"recv", ProbeType::kReturn, "syscall__probe_ret_recv"},
+     {"recvfrom", ProbeType::kEntry, "syscall__probe_entry_recvfrom"},
+     {"recvfrom", ProbeType::kReturn, "syscall__probe_ret_recvfrom"},
+     {"recvmsg", ProbeType::kEntry, "syscall__probe_entry_recvmsg"},
+     {"recvmsg", ProbeType::kReturn, "syscall__probe_ret_recvmsg"},
+     {"recvmmsg", ProbeType::kEntry, "syscall__probe_entry_recvmmsg"},
+     {"recvmmsg", ProbeType::kReturn, "syscall__probe_ret_recvmmsg"},
+     {"close", ProbeType::kEntry, "syscall__probe_entry_close"},
+     {"close", ProbeType::kReturn, "syscall__probe_ret_close"},
+     {"mmap", ProbeType::kEntry, "syscall__probe_entry_mmap"},
+     {"sock_alloc", ProbeType::kReturn, "probe_ret_sock_alloc", /*is_syscall*/ false},
+     {"security_socket_sendmsg", ProbeType::kEntry, "probe_entry_security_socket_sendmsg",
+      /*is_syscall*/ false},
+     {"security_socket_recvmsg", ProbeType::kEntry, "probe_entry_security_socket_recvmsg",
+      /*is_syscall*/ false}});
 
-  constexpr uint64_t kNanosPerSecond = 1000 * 1000 * 1000;
-  if (kNanosPerSecond % sysconfig_.KernelTicksPerSecond() != 0) {
-    return error::Internal(
-        "SC_CLK_TCK aka USER_HZ must be 100, otherwise our BPF code may not generate proper "
-        "timestamps in a way that matches how /proc/stat does it");
-  }
+auto SocketTraceConnector::InitPerfBufferSpecs() {
+  const size_t ncpus = get_nprocs_conf();
 
-  PL_RETURN_IF_ERROR(InitBPFProgram(
-      socket_trace_bcc_script,
-      // PROTOCOL_LIST: Requires update on new protocols.
-      {
-          absl::StrCat("-DENABLE_HTTP_TRACING=", FLAGS_stirling_enable_http_tracing),
-          absl::StrCat("-DENABLE_CQL_TRACING=", FLAGS_stirling_enable_cass_tracing),
-          absl::StrCat("-DENABLE_MUX_TRACING=", FLAGS_stirling_enable_mux_tracing),
-          absl::StrCat("-DENABLE_PGSQL_TRACING=", FLAGS_stirling_enable_pgsql_tracing),
-          absl::StrCat("-DENABLE_MYSQL_TRACING=", FLAGS_stirling_enable_mysql_tracing),
-          absl::StrCat("-DENABLE_KAFKA_TRACING=", FLAGS_stirling_enable_kafka_tracing),
-          absl::StrCat("-DENABLE_DNS_TRACING=", FLAGS_stirling_enable_dns_tracing),
-          absl::StrCat("-DENABLE_REDIS_TRACING=", FLAGS_stirling_enable_redis_tracing),
-          absl::StrCat("-DENABLE_NATS_TRACING=", FLAGS_stirling_enable_nats_tracing),
-          absl::StrCat("-DENABLE_MUX_TRACING=", FLAGS_stirling_enable_mux_tracing),
-          absl::StrCat("-DENABLE_MONGO_TRACING=", "true"),
-      }));
+  double cpu_scaling_factor = (1 + FLAGS_stirling_socket_tracer_percpu_bw_scaling_factor) /
+                              (ncpus + FLAGS_stirling_socket_tracer_percpu_bw_scaling_factor);
+  LOG(INFO) << absl::Substitute("Initializing perf buffers with ncpus=$0 and scaling_factor=$1",
+                                ncpus, cpu_scaling_factor);
+
+  const double kSecondsPerPeriod =
+      std::chrono::duration_cast<std::chrono::milliseconds>(kSamplingPeriod).count() / 1000.0;
+  const int kTargetDataBufferSize = static_cast<int>(
+      FLAGS_stirling_socket_tracer_target_data_bw_percpu * kSecondsPerPeriod * cpu_scaling_factor);
+  const int kTargetControlBufferSize =
+      static_cast<int>(FLAGS_stirling_socket_tracer_target_control_bw_percpu * kSecondsPerPeriod *
+                       cpu_scaling_factor);
+
+  return MakeArray<bpf_tools::PerfBufferSpec>({
+      // For data events. The order must be consistent with output tables.
+      {"socket_data_events", HandleDataEvent, HandleDataEventLoss, kTargetDataBufferSize},
+      // For non-data events. Must not mix with the above perf buffers for data events.
+      {"socket_control_events", HandleControlEvent, HandleControlEventLoss,
+       kTargetControlBufferSize},
+      {"conn_stats_events", HandleConnStatsEvent, HandleConnStatsEventLoss,
+       kTargetControlBufferSize},
+      {"mmap_events", HandleMMapEvent, HandleMMapEventLoss, kTargetControlBufferSize / 10},
+      {"go_grpc_header_events", HandleHTTP2HeaderEvent, HandleHTTP2HeaderEventLoss,
+       kTargetDataBufferSize / 10},
+      {"go_grpc_data_events", HandleHTTP2Data, HandleHTTP2DataLoss, kTargetDataBufferSize},
+  });
+}
+
+Status SocketTraceConnector::InitBPF() {
+  // PROTOCOL_LIST: Requires update on new protocols.
+  std::vector<std::string> defines = {
+      absl::StrCat("-DENABLE_HTTP_TRACING=", FLAGS_stirling_enable_http_tracing),
+      absl::StrCat("-DENABLE_CQL_TRACING=", FLAGS_stirling_enable_cass_tracing),
+      absl::StrCat("-DENABLE_MUX_TRACING=", FLAGS_stirling_enable_mux_tracing),
+      absl::StrCat("-DENABLE_PGSQL_TRACING=", FLAGS_stirling_enable_pgsql_tracing),
+      absl::StrCat("-DENABLE_MYSQL_TRACING=", FLAGS_stirling_enable_mysql_tracing),
+      absl::StrCat("-DENABLE_KAFKA_TRACING=", FLAGS_stirling_enable_kafka_tracing),
+      absl::StrCat("-DENABLE_DNS_TRACING=", FLAGS_stirling_enable_dns_tracing),
+      absl::StrCat("-DENABLE_REDIS_TRACING=", FLAGS_stirling_enable_redis_tracing),
+      absl::StrCat("-DENABLE_NATS_TRACING=", FLAGS_stirling_enable_nats_tracing),
+      absl::StrCat("-DENABLE_MUX_TRACING=", FLAGS_stirling_enable_mux_tracing),
+      absl::StrCat("-DENABLE_MONGO_TRACING=", "true"),
+  };
+  PL_RETURN_IF_ERROR(InitBPFProgram(socket_trace_bcc_script, defines));
+
   PL_RETURN_IF_ERROR(AttachKProbes(kProbeSpecs));
   LOG(INFO) << absl::Substitute("Number of kprobes deployed = $0", kProbeSpecs.size());
   LOG(INFO) << "Probes successfully deployed.";
 
+  const auto kPerfBufferSpecs = InitPerfBufferSpecs();
   PL_RETURN_IF_ERROR(OpenPerfBuffers(kPerfBufferSpecs, this));
   LOG(INFO) << absl::Substitute("Number of perf buffers opened = $0", kPerfBufferSpecs.size());
 
@@ -238,16 +334,31 @@ Status SocketTraceConnector::InitImpl() {
   if (FLAGS_stirling_disable_self_tracing) {
     PL_RETURN_IF_ERROR(DisableSelfTracing());
   }
-  if (!FLAGS_perf_buffer_events_output_path.empty()) {
-    SetupOutput(FLAGS_perf_buffer_events_output_path);
+  if (!FLAGS_socket_trace_data_events_output_path.empty()) {
+    SetupOutput(FLAGS_socket_trace_data_events_output_path);
   }
+
+  return Status::OK();
+}
+
+Status SocketTraceConnector::InitImpl() {
+  sampling_freq_mgr_.set_period(kSamplingPeriod);
+  push_freq_mgr_.set_period(kPushPeriod);
+
+  constexpr uint64_t kNanosPerSecond = 1000 * 1000 * 1000;
+  if (kNanosPerSecond % sysconfig_.KernelTicksPerSecond() != 0) {
+    return error::Internal(
+        "SC_CLK_TCK aka USER_HZ must be 100, otherwise our BPF code may not generate proper "
+        "timestamps in a way that matches how /proc/stat does it");
+  }
+
+  PL_RETURN_IF_ERROR(InitBPF());
 
   StatusOr<std::unique_ptr<system::SocketInfoManager>> s =
       system::SocketInfoManager::Create(system::Config::GetInstance().proc_path(),
                                         system::kTCPEstablishedState | system::kTCPListeningState);
   if (!s.ok()) {
-    LOG(WARNING) << absl::Substitute("Failed to set up socket prober manager. Message: $0",
-                                     s.msg());
+    LOG(WARNING) << absl::Substitute("Failed to set up SocketInfoManager. Message: $0", s.msg());
   } else {
     socket_info_mgr_ = s.ConsumeValueOrDie();
   }
@@ -476,6 +587,12 @@ Status SocketTraceConnector::UpdateBPFProtocolTraceRole(traffic_protocol_t proto
 }
 
 Status SocketTraceConnector::TestOnlySetTargetPID(int64_t pid) {
+  if (pid != kTraceAllTGIDs) {
+    LOG(WARNING) << absl::Substitute(
+        "Target trace PID set to pid=$0, will force BPF to ignore event filtering and "
+        "submit events of this PID to userspace.",
+        pid);
+  }
   auto control_map_handle = GetPerCPUArrayTable<int64_t>(kControlValuesArrayName);
   return UpdatePerCPUArrayValue(kTargetTGIDIndex, pid, &control_map_handle);
 }
@@ -648,7 +765,7 @@ int64_t CalculateLatency(int64_t req_timestamp_ns, int64_t resp_timestamp_ns) {
   int64_t latency_ns = 0;
   if (req_timestamp_ns > 0 && resp_timestamp_ns > 0) {
     latency_ns = resp_timestamp_ns - req_timestamp_ns;
-    LOG_IF(WARNING, latency_ns < 0)
+    LOG_IF_EVERY_N(WARNING, latency_ns < 0, 100)
         << absl::Substitute("Negative latency implies req resp mismatch [t_req=$0, t_resp=$1].",
                             req_timestamp_ns, resp_timestamp_ns);
   }
@@ -775,8 +892,11 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   r.Append<r.ColIndex("req_body")>(std::move(req_data));
   r.Append<r.ColIndex("resp_body_size")>(resp_data_size);
   r.Append<r.ColIndex("resp_body")>(std::move(resp_data));
-  r.Append<r.ColIndex("latency")>(
-      CalculateLatency(req_stream->timestamp_ns, resp_stream->timestamp_ns));
+  int64_t latency_ns = CalculateLatency(req_stream->timestamp_ns, resp_stream->timestamp_ns);
+  r.Append<r.ColIndex("latency")>(latency_ns);
+  // TODO(yzhao): Remove once http2::Record::bpf_timestamp_ns is removed.
+  LOG_IF_EVERY_N(WARNING, latency_ns < 0, 100)
+      << absl::Substitute("Negative latency found in HTTP2 records, record=$0", record.ToString());
 #ifndef NDEBUG
   r.Append<r.ColIndex("px_info_")>(ToString(conn_tracker.conn_id()));
 #endif
@@ -991,7 +1111,7 @@ void SocketTraceConnector::SetupOutput(const std::filesystem::path& path) {
   perf_buffer_events_output_stream_ = std::make_unique<std::ofstream>(abs_path);
   std::string format = "text";
   constexpr char kBinSuffix[] = ".bin";
-  if (absl::EndsWith(FLAGS_perf_buffer_events_output_path, kBinSuffix)) {
+  if (absl::EndsWith(FLAGS_socket_trace_data_events_output_path, kBinSuffix)) {
     perf_buffer_events_output_format_ = OutputFormat::kBin;
     format = "binary";
   }
@@ -1046,7 +1166,13 @@ void SocketTraceConnector::WriteDataEvent(const SocketDataEvent& event) {
 template <typename TProtocolTraits>
 void SocketTraceConnector::TransferStream(ConnectorContext* ctx, ConnTracker* tracker,
                                           DataTable* data_table) {
+  using TFrameType = typename TProtocolTraits::frame_type;
+
   VLOG(3) << absl::StrCat("Connection\n", DebugString<TProtocolTraits>(*tracker, ""));
+
+  // Make sure the tracker's frames containers have been properly initialized.
+  // This is a nop if the containers are already of the right type.
+  tracker->InitFrames<TFrameType>();
 
   if (tracker->state() == ConnTracker::State::kTransferring) {
     // ProcessToRecords() parses raw events and produces messages in format that are expected by
@@ -1057,11 +1183,17 @@ void SocketTraceConnector::TransferStream(ConnectorContext* ctx, ConnTracker* tr
           &record, [&](uint64_t mono_time) { return ConvertToRealTime(mono_time); });
       AppendMessage(ctx, *tracker, std::move(record), data_table);
     }
-
-    auto expiry_timestamp =
-        iteration_time_ - std::chrono::seconds(FLAGS_messages_expiration_duration_secs);
-    tracker->Cleanup<TProtocolTraits>(FLAGS_messages_size_limit_bytes, expiry_timestamp);
   }
+
+  auto message_expiry_timestamp =
+      iteration_time_ - std::chrono::seconds(FLAGS_messages_expiry_duration_secs);
+
+  auto buffer_expiry_timestamp = std::chrono::steady_clock::now() -
+                                 std::chrono::seconds(FLAGS_datastream_buffer_expiry_duration_secs);
+
+  tracker->Cleanup<TProtocolTraits>(FLAGS_messages_size_limit_bytes,
+                                    FLAGS_datastream_buffer_retention_size,
+                                    message_expiry_timestamp, buffer_expiry_timestamp);
 }
 
 void SocketTraceConnector::TransferConnStats(ConnectorContext* ctx, DataTable* data_table) {

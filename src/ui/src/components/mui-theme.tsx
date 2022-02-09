@@ -21,82 +21,81 @@ import { createTheme, Theme } from '@mui/material/styles';
 
 declare module '@mui/material/styles/createPalette' {
   interface TypeBackground {
-    one?: string;
-    two?: string;
-    three?: string;
-    four?: string;
-    five?: string;
-    six?: string;
+    one: string;
+    two: string;
+    three: string;
+    four: string;
+    five: string;
+    six: string;
   }
 
   interface Palette {
     foreground: {
-      one?: string;
-      two?: string;
-      three?: string;
-      grey1?: string;
-      grey2?: string;
-      grey3?: string;
-      grey4?: string;
-      grey5?: string;
+      one: string;
+      two: string;
+      three: string;
+      grey1: string;
+      grey2: string;
+      grey3: string;
+      grey4: string;
+      grey5: string;
       white: string;
     };
     sideBar: {
-      color?: string;
-      colorShadow?: string;
-      colorShadowOpacity?: number;
+      color: string;
+      colorShadow: string;
+      colorShadowOpacity: number;
     };
     graph: {
-      category?: string[];
-      diverging?: string[];
-      ramp?: string[];
-      heatmap?: string[];
-      primary?: string;
-      flamegraph?: {
+      category: string[];
+      diverging: string[];
+      ramp: string[];
+      heatmap: string[];
+      primary: string;
+      flamegraph: {
         kernel: string,
         app: string,
         k8s: string,
       };
     };
     border: {
-      focused?: string;
-      unFocused?: string;
+      focused: string;
+      unFocused: string;
     };
   }
 
   interface PaletteOptions {
     foreground: {
-      one?: string;
-      two?: string;
-      three?: string;
-      four?: string;
-      grey1?: string;
-      grey2?: string;
-      grey3?: string;
-      grey4?: string;
-      grey5?: string;
-      white?: string;
+      one: string;
+      two: string;
+      three: string;
+      grey1: string;
+      grey2: string;
+      grey3: string;
+      grey4: string;
+      grey5: string;
+      white: string;
     };
     sideBar: {
-      color?: string;
-      colorShadow?: string;
-      colorShadowOpacity?: number;
+      color: string;
+      colorShadow: string;
+      colorShadowOpacity: number;
     };
     graph: {
-      category?: string[];
-      diverging?: string[];
-      ramp?: string[];
-      heatmap?: string[];
-      flamegraph?: {
+      primary: string;
+      category: string[];
+      diverging: string[];
+      ramp: string[];
+      heatmap: string[];
+      flamegraph: {
         kernel: string,
         app: string,
         k8s: string,
       };
-      primary?: string;
     };
     border: {
-      focused?: string;
-      unFocused?: string;
+      focused: string;
+      unFocused: string;
     };
   }
 }
@@ -116,6 +115,20 @@ declare module '@mui/material/styles' {
   interface Theme {
     shape: Shape;
   }
+
+  interface TypographyVariants {
+    monospace: React.CSSProperties;
+  }
+
+  interface TypographyVariantOptions {
+    monospace?: React.CSSProperties;
+  }
+}
+
+declare module '@mui/material/Typography' {
+  interface TypographyPropsVariantOverrides {
+    monospace: true;
+  }
 }
 
 declare module '@mui/material/styles/createTheme' {
@@ -126,7 +139,7 @@ declare module '@mui/material/styles/createTheme' {
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export const scrollbarStyles = (theme: Theme) => {
-  const commonStyle = (color) => ({
+  const commonStyle = (color: string) => ({
     borderRadius: theme.spacing(1.0),
     border: [['solid', theme.spacing(0.7), 'transparent']],
     backgroundColor: 'transparent',
@@ -150,8 +163,12 @@ export const EDITOR_THEME_MAP: Record<PaletteMode, string> = {
   light: 'vs-light',
 };
 
+// Note: not explicitly typed, as it's a messy nested partial of ThemeOptions.
+// When combined with LIGHT_THEME and DARK_THEME below, however, TypeScript
+// will still recognize if the merged object is missing anything.
 export const COMMON_THEME = {
   shape: {
+    borderRadius: '5px',
     leftRoundedBorderRadius: {
       large: '10px 0px 0px 10px',
       small: '5px 0px 0px 5px',
@@ -161,17 +178,24 @@ export const COMMON_THEME = {
       small: '0px 5px 5px 0px',
     },
   },
+  zIndex: {
+    drawer: 1075, // Normally higher than appBar and below modal. We want it below appBar.
+  },
   typography: {
     // The below rem conversions are based on a root font-size of 16px.
+    h1: {
+      fontSize: '2.125rem', // 34px
+      fontWeight: 400,
+    },
+    h2: {
+      fontSize: '1.5rem', // 24px
+      fontWeight: 500,
+    },
     h3: {
       fontSize: '1.125rem', // 18px
       fontWeight: 500,
       marginBottom: '16px',
       marginTop: '12px',
-    },
-    h2: {
-      fontSize: '1.5rem', // 24px
-      fontWeight: 500,
     },
     h4: {
       fontSize: '0.875rem', // 14px
@@ -187,9 +211,8 @@ export const COMMON_THEME = {
       fontSize: '0.875rem', // 14px
       fontWeight: 400,
     },
-    h1: {
-      fontSize: '2.125rem', // 34px
-      fontWeight: 400,
+    monospace: {
+      fontFamily: '"Roboto Mono", monospace',
     },
   },
   palette: {
@@ -215,26 +238,6 @@ export const COMMON_THEME = {
       main: '#24b2ff',
       dark: '#21a1e7',
       light: '#79d0ff',
-    },
-    success: {
-      main: '#00dba6',
-      dark: '#00bd8f',
-      light: '#4dffd4',
-    },
-    warning: {
-      main: '#f6a609',
-      dark: '#dc9406',
-      light: '#ffc656',
-    },
-    info: {
-      main: '#f0de3d',
-      dark: '#dac92f',
-      light: '#fff48f',
-    },
-    error: {
-      main: '#ff5e6d',
-      dark: '#e54e5c',
-      light: '#ff9fa8',
     },
     action: {
       active: '#a6a8ae', // foreground 1.
@@ -273,19 +276,49 @@ export const COMMON_THEME = {
         '#549cc6', // dark-1
         '#1d78b5', // dark-2
       ],
-      flamegraph: {
-        kernel: '#98df8a',
-        app: '#31d0f3',
-        k8s: '#4796c1',
-      },
-      primary: '#39A8F5',
+      primary: '#39a8f5',
     },
   },
   components: {
-    MuiDivider: {
+    MuiCssBaseline: {
+      // Global styles.
       styleOverrides: {
-        root: {
-          backgroundColor: '#353535', // background three.
+        '#root': {
+          height: '100%',
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        html: {
+          height: '100%',
+        },
+        body: {
+          height: '100%',
+          overflow: 'hidden',
+          margin: 0,
+          boxSizing: 'border-box',
+        },
+        ':focus': {
+          outline: 'none !important',
+        },
+        // Vega-Tooltip (included in Vega-Lite) doesn't quite get right math when constraining a tooltip to the screen.
+        // Also, we sometimes use titles so long they fill the screen (like generated method signatures in flamegraphs).
+        // Sticky positioning and multi-line word wrap, respectively, handle both issues with just CSS.
+        '#vg-tooltip-element.vg-tooltip': {
+          maxWidth: 'min(400px, 80vw)',
+          width: 'fit-content',
+          position: 'sticky',
+          // The div#root element confuses sticky positioning without this negative margin.
+          marginTop: '-100vh',
+          '& > h2': {
+            display: '-webkit-box',
+            maxWidth: '100%',
+            WebkitLineClamp: 4,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            overflowWrap: 'anywhere',
+          },
         },
       },
     },
@@ -299,11 +332,13 @@ export const COMMON_THEME = {
   },
 };
 
-export const DARK_THEME = createTheme({
+export const DARK_THEME: Theme = createTheme({
   ...COMMON_THEME,
   ...{
     palette: {
       ...COMMON_THEME.palette,
+      mode: 'dark',
+      divider: '#272822',
       foreground: {
         one: '#b2b5bb',
         two: '#f2f2f2',
@@ -315,7 +350,6 @@ export const DARK_THEME = createTheme({
         grey5: '#dbdde0',
         white: '#ffffff',
       },
-      divider: '#272822',
       background: {
         default: '#121212',
         paper: '#121212',
@@ -326,30 +360,59 @@ export const DARK_THEME = createTheme({
         five: '#090909',
         six: '#242424',
       },
-      mode: 'dark',
       text: {
-        primary: '#e2e5ee', // foreground 1
-        secondary: '#ffffff', // foreground 2
-        disabled: '#',
+        primary: '#e2e5ee',
+        secondary: '#ffffff',
+        disabled: 'rgba(226, 229, 238, 0.7)', // 70% opacity of primary
+      },
+      success: {
+        main: '#00dba6',
+        dark: '#00bd8f',
+        light: '#4dffd4',
+      },
+      warning: {
+        main: '#f6a609',
+        dark: '#dc9406',
+        light: '#ffc656',
+      },
+      info: { // Same as secondary
+        main: '#24b2ff',
+        dark: '#21a1e7',
+        light: '#79d0ff',
+      },
+      error: {
+        main: '#ff5e6d',
+        dark: '#e54e5c',
+        light: '#ff9fa8',
+      },
+      graph: {
+        ...COMMON_THEME.palette.graph,
+        flamegraph: {
+          kernel: '#98df8a',
+          app: '#31d0f3',
+          k8s: '#4796c1',
+        },
+      },
+    },
+    components: {
+      ...COMMON_THEME.components,
+      MuiDivider: {
+        styleOverrides: {
+          root: {
+            backgroundColor: '#353535', // background three.
+          },
+        },
       },
     },
   },
 });
 
-export const LIGHT_THEME = createTheme({
+export const LIGHT_THEME: Theme = createTheme({
   ...COMMON_THEME,
   ...{
     palette: {
       ...COMMON_THEME.palette,
-      background: {
-        default: '#f6f6f6',
-        paper: '#fbfbfb',
-        one: '#fbfbfb',
-        two: '#ffffff',
-        three: '#f5f5f5',
-        four: '#f8f9fa',
-        six: '#ffffff',
-      },
+      mode: 'light',
       divider: '#dbdde0',
       foreground: {
         one: '#4f4f4f',
@@ -362,82 +425,58 @@ export const LIGHT_THEME = createTheme({
         grey5: '#000000',
         white: '#ffffff',
       },
-      sideBar: {
-        color: '#161616',
-        colorShadow: '#000000',
-        colorShadowOpacity: 0.5,
+      background: {
+        default: '#f6f6f6',
+        paper: '#fbfbfb',
+        one: '#fbfbfb',
+        two: '#ffffff',
+        three: '#f5f5f5',
+        four: '#f8f9fa',
+        five: '#fbfcfd',
+        six: '#ffffff',
       },
-      common: {
-        black: '#000000',
-        white: '#ffffff',
+      text: {
+        primary: 'rgba(0, 0, 0, 0.87)', // Material default
+        secondary: '#000000',
+        disabled: 'rgba(0, 0, 0, 0.7)', // Muted
       },
-      primary: {
-        main: '#12d6d6',
-        dark: '#17aaaa',
-        light: '#3ef3f3',
+      success: {
+        main: '#00bd8f',
+        dark: '#4dffd4',
+        light: '#00dba6',
       },
-      secondary: {
+      warning: {
+        main: '#dc9406',
+        dark: '#ffc656',
+        light: '#f6a609',
+      },
+      info: { // Same as secondary
         main: '#24b2ff',
         dark: '#21a1e7',
         light: '#79d0ff',
       },
-      success: {
-        main: '#00BD8F',
-      },
-      warning: {
-        main: '#dc9406',
-      },
-      info: {
-        main: '#f0de3d',
-        dark: '#dac92f',
-        light: '#fff48f',
-      },
       error: {
         main: '#e54e5c',
-      },
-      action: {
-        active: '#a6a8ae', // foreground 1.
+        dark: '#ff9fa8',
+        light: '#ff5e6d',
       },
       graph: {
-        category: [
-          '#21a1e7', // one
-          '#2ca02c', // two
-          '#98df8a', // three
-          '#aec7e8', // four
-          '#ff7f0e', // five
-          '#ffbb78', // six
-        ],
-        diverging: [
-          '#cc0020', // left-dark
-          '#e77866', // left-main
-          '#f6e7e1', // left-light
-          '#d6e8ed', // right-light
-          '#91bfd9', // right-main
-          '#1d78b5', // right-dark
-        ],
-        ramp: [
-          '#fff48f', // info-light
-          '#f0de3d', // info-main
-          '#dac92f', // info-dark
-          '#ffc656', // warning-light
-          '#f6a609', // warning-main
-          '#dc9406', // warning-dark
-          '#ff5e6d', // error-main
-          '#e54e5c', // error-dark
-        ],
-        heatmap: [
-          '#d6e8ed', // light-1
-          '#cee0e5', // light-2
-          '#91bfd9', // main
-          '#549cc6', // dark-1
-          '#1d78b5', // dark-2
-        ],
+        ...COMMON_THEME.palette.graph,
         flamegraph: {
           kernel: '#90cb84',
           app: '#00b1d8',
           k8s: '#4796c1',
         },
-        primary: '#39A8F5',
+      },
+    },
+    components: {
+      ...COMMON_THEME.components,
+      MuiDivider: {
+        styleOverrides: {
+          root: {
+            backgroundColor: '#a9adb1', // background three.
+          },
+        },
       },
     },
   },

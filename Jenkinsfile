@@ -507,7 +507,7 @@ def InitializeRepoState(String stashName = SRC_STASH_NAME) {
 def DefaultGitPodTemplate(String suffix, Closure body) {
   RetryOnK8sDownscale {
     def label = "worker-git-${env.BUILD_TAG}-${suffix}"
-    podTemplate(label: label, cloud: 'devinfra-cluster', containers: [
+    podTemplate(label: label, cloud: 'devinfra-cluster-usw1-0', containers: [
       containerTemplate(name: 'git', image: 'bitnami/git:2.33.0', command: 'cat', ttyEnabled: true)
     ]) {
       node(label) {
@@ -520,7 +520,7 @@ def DefaultGitPodTemplate(String suffix, Closure body) {
 def DefaultGCloudPodTemplate(String suffix, Closure body) {
   RetryOnK8sDownscale {
     def label = "worker-gcloud-${env.BUILD_TAG}-${suffix}"
-    podTemplate(label: label, cloud: 'devinfra-cluster', containers: [
+    podTemplate(label: label, cloud: 'devinfra-cluster-usw1-0', containers: [
       containerTemplate(name: 'gcloud', image: GCLOUD_DOCKER_IMAGE, command: 'cat', ttyEnabled: true)
     ]) {
       node(label) {
@@ -533,7 +533,7 @@ def DefaultGCloudPodTemplate(String suffix, Closure body) {
 def DefaultCopybaraPodTemplate(String suffix, Closure body) {
   RetryOnK8sDownscale {
     def label = "worker-copybara-${env.BUILD_TAG}-${suffix}"
-    podTemplate(label: label, cloud: 'devinfra-cluster', containers: [
+    podTemplate(label: label, cloud: 'devinfra-cluster-usw1-0', containers: [
       containerTemplate(name: 'copybara', image: COPYBARA_DOCKER_IMAGE, command: 'cat', ttyEnabled: true),
     ]) {
       node(label) {
@@ -547,7 +547,7 @@ def DefaultBuildPodTemplate(String suffix, Closure body) {
   RetryOnK8sDownscale {
     def label = "worker-${env.BUILD_TAG}-${suffix}"
     podTemplate(
-      label: label, cloud: 'devinfra-cluster', containers: [
+      label: label, cloud: 'devinfra-cluster-usw1-0', containers: [
         containerTemplate(
           name: 'pxbuild', image: 'gcr.io/' + devDockerImageWithTag,
           command: 'cat', ttyEnabled: true,
@@ -648,7 +648,7 @@ def buildDbg = {
 def buildGoRace = {
   WithSourceCodeAndTargetsK8s('build-go-race') {
     container('pxbuild') {
-      bazelCICmd('build-go-race', 'clang', 'opt', 'go_race', '--@io_bazel_rules_go//go/config:race')
+      bazelCICmd('build-go-race', 'go_race', 'opt', 'go_race')
     }
   }
 }
@@ -1008,22 +1008,6 @@ def buildScriptForNightlyTestRegression = {
     stage('Pre-Build') {
       parallel(preBuild)
     }
-    stage('Build & Push to Stirling Perf') {
-      WithSourceCodeK8s {
-        container('pxbuild') {
-          withKubeConfig([
-            credentialsId: 'stirling-cluster-creds',
-            serverUrl: 'https://stirling.internal.corp.pixielabs.ai',
-            namespace: 'pl'
-          ]) {
-            sh """
-            skaffold run --profile=opt --filename=skaffold/skaffold_vizier.yaml \
-            --label=commit=\$(git rev-parse HEAD) --cache-artifacts=false --default-repo='gcr.io/pl-dev-infra'
-            """
-          }
-        }
-      }
-    }
     stage('Testing') {
       parallel(regressionBuilders)
     }
@@ -1071,6 +1055,7 @@ def updateVersionsDB(String credsName, String clusterURL, String namespace) {
     }
   }
 }
+
 def  buildScriptForCLIRelease = {
   DefaultGCloudPodTemplate('root') {
     withCredentials([

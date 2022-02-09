@@ -16,7 +16,7 @@
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load(":repository_locations.bzl", "GIT_REPOSITORY_LOCATIONS", "REPOSITORY_LOCATIONS")
+load(":repository_locations.bzl", "GIT_REPOSITORY_LOCATIONS", "LOCAL_REPOSITORY_LOCATIONS", "REPOSITORY_LOCATIONS")
 
 # Make all contents of an external repository accessible under a filegroup.
 # Used for external HTTP archives, e.g. cares.
@@ -68,8 +68,30 @@ def _git_repo_impl(name, **kwargs):
         **kwargs
     )
 
+def _local_repo_impl(name, **kwargs):
+    # `existing_rule_keys` contains the names of repositories that have already
+    # been defined in the Bazel workspace. By skipping repos with existing keys,
+    # users can override dependency versions by using standard Bazel repository
+    # rules in their WORKSPACE files.
+    existing_rule_keys = native.existing_rules().keys()
+    if name in existing_rule_keys:
+        # This repository has already been defined, probably because the user
+        # wants to override the version. Do nothing.
+        return
+
+    location = LOCAL_REPOSITORY_LOCATIONS[name]
+
+    native.new_local_repository(
+        name = name,
+        path = location["path"],
+        **kwargs
+    )
+
 def _git_repo(name, **kwargs):
     _git_repo_impl(name, **kwargs)
+
+def _local_repo(name, **kwargs):
+    _local_repo_impl(name, **kwargs)
 
 # For bazel repos do not require customization.
 def _bazel_repo(name, **kwargs):
@@ -84,13 +106,13 @@ def _com_llvm_lib():
     native.new_local_repository(
         name = "com_llvm_lib",
         build_file = "bazel/external/llvm.BUILD",
-        path = "/opt/clang-11.1",
+        path = "/opt/clang-13.0",
     )
 
     native.new_local_repository(
         name = "com_llvm_lib_libcpp",
         build_file = "bazel/external/llvm.BUILD",
-        path = "/opt/clang-11.1-libc++",
+        path = "/opt/clang-13.0-libc++",
     )
 
 def _cc_deps():
@@ -114,33 +136,36 @@ def _cc_deps():
     _bazel_repo("com_github_jupp0r_prometheus_cpp")
 
     # Dependencies where we provide an external BUILD file.
-    _bazel_repo("com_github_apache_arrow", build_file = "@px//bazel/external:arrow.BUILD")
-    _bazel_repo("com_github_ariafallah_csv_parser", build_file = "@px//bazel/external:csv_parser.BUILD")
-    _bazel_repo("com_github_arun11299_cpp_jwt", build_file = "@px//bazel/external:cpp_jwt.BUILD")
-    _bazel_repo("com_github_cameron314_concurrentqueue", build_file = "@px//bazel/external:concurrentqueue.BUILD")
-    _bazel_repo("com_github_cmcqueen_aes_min", patches = ["@px//bazel/external:aes_min.patch"], patch_args = ["-p1"], build_file = "@px//bazel/external:aes_min.BUILD")
-    _bazel_repo("com_github_cyan4973_xxhash", build_file = "@px//bazel/external:xxhash.BUILD")
-    _bazel_repo("com_github_nlohmann_json", build_file = "@px//bazel/external:nlohmann_json.BUILD")
-    _bazel_repo("com_github_packetzero_dnsparser", build_file = "@px//bazel/external:dnsparser.BUILD")
-    _bazel_repo("com_github_rlyeh_sole", build_file = "@px//bazel/external:sole.BUILD")
-    _bazel_repo("com_github_serge1_elfio", build_file = "@px//bazel/external:elfio.BUILD")
-    _bazel_repo("com_github_derrickburns_tdigest", build_file = "@px//bazel/external:tdigest.BUILD")
-    _bazel_repo("com_github_tencent_rapidjson", build_file = "@px//bazel/external:rapidjson.BUILD")
-    _bazel_repo("com_github_vinzenz_libpypa", build_file = "@px//bazel/external:libpypa.BUILD")
-    _bazel_repo("com_google_double_conversion", build_file = "@px//bazel/external:double_conversion.BUILD")
-    _bazel_repo("com_github_google_sentencepiece", build_file = "@px//bazel/external:sentencepiece.BUILD", patches = ["@px//bazel/external:sentencepiece.patch"], patch_args = ["-p1"])
-    _bazel_repo("com_github_antlr_antlr4", build_file = "@px//bazel/external:antlr4.BUILD", patches = ["@px//bazel/external:antlr4.patch"], patch_args = ["-p1"])
-    _bazel_repo("com_github_antlr_grammars_v4", build_file = "@px//bazel/external:antlr_grammars.BUILD", patches = ["@px//bazel/external:antlr_grammars.patch"], patch_args = ["-p1"])
-    _bazel_repo("com_github_pgcodekeeper_pgcodekeeper", build_file = "@px//bazel/external:pgsql_grammar.BUILD", patches = ["@px//bazel/external:pgsql_grammar.patch"], patch_args = ["-p1"])
-    _bazel_repo("com_github_simdutf_simdutf", build_file = "@px//bazel/external:simdutf.BUILD")
-    _bazel_repo("com_github_USCiLab_cereal", build_file = "@px//bazel/external:cereal.BUILD")
-    _bazel_repo("com_intel_tbb", build_file = "@px//bazel/external:tbb.BUILD")
-    _bazel_repo("com_google_farmhash", build_file = "@px//bazel/external:farmhash.BUILD")
-    _bazel_repo("com_github_h2o_picohttpparser", build_file = "@px//bazel/external:picohttpparser.BUILD")
-    _bazel_repo("com_github_opentelemetry_proto", build_file = "@px//bazel/external:opentelemetry.BUILD")
+    _bazel_repo("com_github_apache_arrow", build_file = "//bazel/external:arrow.BUILD")
+    _bazel_repo("com_github_ariafallah_csv_parser", build_file = "//bazel/external:csv_parser.BUILD")
+    _bazel_repo("com_github_arun11299_cpp_jwt", build_file = "//bazel/external:cpp_jwt.BUILD")
+    _bazel_repo("com_github_cameron314_concurrentqueue", build_file = "//bazel/external:concurrentqueue.BUILD")
+    _bazel_repo("com_github_cmcqueen_aes_min", patches = ["//bazel/external:aes_min.patch"], patch_args = ["-p1"], build_file = "//bazel/external:aes_min.BUILD")
+    _bazel_repo("com_github_cyan4973_xxhash", build_file = "//bazel/external:xxhash.BUILD")
+    _bazel_repo("com_github_nlohmann_json", build_file = "//bazel/external:nlohmann_json.BUILD")
+    _bazel_repo("com_github_packetzero_dnsparser", build_file = "//bazel/external:dnsparser.BUILD")
+    _bazel_repo("com_github_rlyeh_sole", build_file = "//bazel/external:sole.BUILD")
+    _bazel_repo("com_github_serge1_elfio", build_file = "//bazel/external:elfio.BUILD")
+    _bazel_repo("com_github_derrickburns_tdigest", build_file = "//bazel/external:tdigest.BUILD")
+    _bazel_repo("com_github_tencent_rapidjson", build_file = "//bazel/external:rapidjson.BUILD")
+    _bazel_repo("com_github_vinzenz_libpypa", build_file = "//bazel/external:libpypa.BUILD")
+    _bazel_repo("com_google_double_conversion", build_file = "//bazel/external:double_conversion.BUILD")
+    _bazel_repo("com_github_google_sentencepiece", build_file = "//bazel/external:sentencepiece.BUILD", patches = ["//bazel/external:sentencepiece.patch"], patch_args = ["-p1"])
+    _bazel_repo("com_github_antlr_antlr4", build_file = "//bazel/external:antlr4.BUILD", patches = ["//bazel/external:antlr4.patch"], patch_args = ["-p1"])
+    _bazel_repo("com_github_antlr_grammars_v4", build_file = "//bazel/external:antlr_grammars.BUILD", patches = ["//bazel/external:antlr_grammars.patch"], patch_args = ["-p1"])
+    _bazel_repo("com_github_pgcodekeeper_pgcodekeeper", build_file = "//bazel/external:pgsql_grammar.BUILD", patches = ["//bazel/external:pgsql_grammar.patch"], patch_args = ["-p1"])
+    _bazel_repo("com_github_simdutf_simdutf", build_file = "//bazel/external:simdutf.BUILD")
+    _bazel_repo("com_github_USCiLab_cereal", build_file = "//bazel/external:cereal.BUILD")
+    _bazel_repo("com_intel_tbb", build_file = "//bazel/external:tbb.BUILD")
+    _bazel_repo("com_google_farmhash", build_file = "//bazel/external:farmhash.BUILD")
+    _bazel_repo("com_github_h2o_picohttpparser", build_file = "//bazel/external:picohttpparser.BUILD")
+    _bazel_repo("com_github_opentelemetry_proto", build_file = "//bazel/external:opentelemetry.BUILD")
 
-    _git_repo("com_github_iovisor_bcc", build_file = "@px//bazel/external:bcc.BUILD")
-    _git_repo("com_github_iovisor_bpftrace", build_file = "@px//bazel/external:bpftrace.BUILD")
+    # Uncomment these to develop bcc and/or bpftrace locally. Should also comment out the corresponding _git_repo lines.
+    # _local_repo("com_github_iovisor_bcc", build_file = "//bazel/external/local_dev:bcc.BUILD")
+    # _local_repo("com_github_iovisor_bpftrace", build_file = "//bazel/external/local_dev:bpftrace.BUILD")
+    _git_repo("com_github_iovisor_bcc", build_file = "//bazel/external:bcc.BUILD")
+    _git_repo("com_github_iovisor_bpftrace", build_file = "//bazel/external:bpftrace.BUILD")
 
     # TODO(jps): For jattach, consider using a patch and directly pulling from upstream (vs. fork).
     _git_repo("com_github_apangin_jattach", build_file = "//bazel/external:jattach.BUILD")
@@ -181,7 +206,6 @@ def pl_deps():
     _bazel_repo("io_bazel_rules_go")
     _bazel_repo("io_bazel_rules_scala")
     _bazel_repo("rules_jvm_external")
-    _bazel_repo("io_bazel_toolchains")
     _bazel_repo("rules_foreign_cc")
     _bazel_repo("io_bazel_rules_k8s")
     _bazel_repo("io_bazel_rules_closure")

@@ -25,6 +25,7 @@
 
 #include "src/common/testing/testing.h"
 #include "src/stirling/source_connectors/socket_tracer/testing/event_generator.h"
+#include "src/stirling/testing/common.h"
 
 namespace px {
 namespace stirling {
@@ -62,27 +63,23 @@ TEST_F(DataStreamTest, LostEvent) {
   stream.AddData(std::move(req0));
   stream.ProcessBytesToFrames<http::Message>(message_type_t::kRequest, &state);
   EXPECT_THAT(stream.Frames<http::Message>(), SizeIs(1));
-  EXPECT_FALSE(stream.IsStuck());
 
   // Now add some lost events - should get skipped over.
   PL_UNUSED(req1);  // Lost event.
   stream.AddData(std::move(req2));
   stream.ProcessBytesToFrames<http::Message>(message_type_t::kRequest, &state);
   EXPECT_THAT(stream.Frames<http::Message>(), SizeIs(2));
-  EXPECT_FALSE(stream.IsStuck());
 
   // Some more requests, and another lost request (this time undetectable).
   stream.AddData(std::move(req3));
   PL_UNUSED(req4);
   stream.ProcessBytesToFrames<http::Message>(message_type_t::kRequest, &state);
   EXPECT_THAT(stream.Frames<http::Message>(), SizeIs(3));
-  EXPECT_FALSE(stream.IsStuck());
 
   // Now the lost event should be detected.
   stream.AddData(std::move(req5));
   stream.ProcessBytesToFrames<http::Message>(message_type_t::kRequest, &state);
   EXPECT_THAT(stream.Frames<http::Message>(), SizeIs(4));
-  EXPECT_FALSE(stream.IsStuck());
 }
 
 TEST_F(DataStreamTest, StuckTemporarily) {
@@ -134,8 +131,9 @@ TEST_F(DataStreamTest, StuckTooLong) {
   stream.ProcessBytesToFrames<http::Message>(message_type_t::kRequest, &state);
   EXPECT_THAT(stream.Frames<http::Message>(), IsEmpty());
 
-  stream.ProcessBytesToFrames<http::Message>(message_type_t::kRequest, &state);
-  EXPECT_THAT(stream.Frames<http::Message>(), IsEmpty());
+  // Sleep for buffer_resync_duration_secs to a trigger resync starting from pos 1.
+  SET_TEST_FLAG(FLAGS_buffer_resync_duration_secs, 1);
+  sleep(FLAGS_buffer_resync_duration_secs);
 
   // Remaining data does not arrive in time, so stuck recovery has already removed req0a.
   // req0b will be noticed as invalid and cleared out as well.
@@ -231,11 +229,12 @@ TEST_F(DataStreamTest, LateArrivalPlusMissingEvents) {
   stream.ProcessBytesToFrames<http::Message>(message_type_t::kRequest, &state);
   ASSERT_THAT(stream.Frames<http::Message>(), IsEmpty());
 
-  stream.ProcessBytesToFrames<http::Message>(message_type_t::kRequest, &state);
-  ASSERT_THAT(stream.Frames<http::Message>(), IsEmpty());
+  // Setting buffer_expiry_timestamp to now to simulate a large delay.
+  int buffer_size_limit = 10000;
+  auto buffer_expiry_timestamp = std::chrono::steady_clock::now();
 
-  stream.ProcessBytesToFrames<http::Message>(message_type_t::kRequest, &state);
-  ASSERT_THAT(stream.Frames<http::Message>(), IsEmpty());
+  stream.CleanupEvents(buffer_size_limit, buffer_expiry_timestamp);
+  EXPECT_TRUE(stream.Empty<http::Message>());
 
   stream.AddData(std::move(req0b));
   stream.AddData(std::move(req1a));
@@ -370,7 +369,10 @@ TEST_F(DataStreamTest, CannotSwitchType) {
 }
 
 TEST_F(DataStreamTest, SpikeCapacityWithLargeDataChunk) {
-  DataStream stream(1024, 16);
+  int spike_capacity_bytes = 1024;
+  int retention_capacity_bytes = 16;
+  auto buffer_expiry_timestamp = std::chrono::steady_clock::now() - std::chrono::seconds(10000);
+  DataStream stream(spike_capacity_bytes);
 
   testing::EventGenerator event_gen(&real_clock_);
   std::unique_ptr<SocketDataEvent> resp0 = event_gen.InitRecvEvent<kProtocolHTTP>(kHTTPResp0);
@@ -384,6 +386,7 @@ TEST_F(DataStreamTest, SpikeCapacityWithLargeDataChunk) {
 
   protocols::NoState state{};
   stream.ProcessBytesToFrames<http::Message>(message_type_t::kResponse, &state);
+  stream.CleanupEvents(retention_capacity_bytes, buffer_expiry_timestamp);
   EXPECT_THAT(stream.Frames<http::Message>(), SizeIs(2));
   EXPECT_EQ(stream.data_buffer().size(), 16);
 }

@@ -17,6 +17,7 @@
  */
 
 #include "src/stirling/source_connectors/perf_profiler/perf_profile_connector.h"
+#include "src/stirling/source_connectors/perf_profiler/symbolizers/java_symbolizer.h"
 
 #include <sys/sysinfo.h>
 
@@ -32,6 +33,7 @@ BPF_SRC_STRVIEW(profiler_bcc_script, profiler);
 DEFINE_string(stirling_profiler_symbolizer, "bcc",
               "Choice of which symbolizer to use. Options: bcc, elf");
 DEFINE_bool(stirling_profiler_cache_symbols, true, "Whether to cache symbols");
+DEFINE_bool(stirling_profiler_java_symbols, false, "Java symbols.");
 DEFINE_uint32(stirling_profiler_log_period_minutes, 10,
               "Number of minutes between profiler stats log printouts.");
 DEFINE_uint32(stirling_profiler_table_update_period_seconds,
@@ -39,6 +41,16 @@ DEFINE_uint32(stirling_profiler_table_update_period_seconds,
               "Number of seconds between profiler table updates.");
 DEFINE_uint32(stirling_profiler_stack_trace_sample_period_ms, 11,
               "Number of milliseconds between stack trace samples.");
+
+// Scaling factor is sized to avoid hash table collisions and timing variations.
+DEFINE_double(stirling_profiler_stack_trace_size_factor, 3.0,
+              "Scaling factor to apply to Profiler's eBPF stack trace map sizes");
+
+// Scaling factor for perf buffer to account for timing variations.
+// This factor is smaller than the stack trace scaling factor because there is no need to account
+// for hash table collisions.
+DEFINE_double(stirling_profiler_perf_buffer_size_factor, 1.5,
+              "Scaling factor to apply to Profiler's eBPF perf buffer map sizes");
 
 namespace px {
 namespace stirling {
@@ -63,22 +75,42 @@ Status PerfProfileConnector::InitImpl() {
 
   const size_t ncpus = get_nprocs_conf();
 
-  const std::vector<std::string> defines = {
-      absl::Substitute("-DNCPUS=$0", ncpus),
-      absl::Substitute("-DTRANSFER_PERIOD=$0", sampling_period_.count()),
-      absl::Substitute("-DSAMPLE_PERIOD=$0", stack_trace_sampling_period_.count())};
+  // Compute sizes of eBPF data structures:
 
-  // Compute the perf buffer size.
+  // Given the targeted "transfer period" and the "stack trace sample period",
+  // we can find the number of entries required to be allocated in each of the maps,
+  // i.e. the number of expected stack traces:
   const int32_t expected_stack_traces_per_cpu =
       IntRoundUpDivide(sampling_period_.count(), stack_trace_sampling_period_.count());
-  const int32_t expected_stack_races = ncpus * expected_stack_traces_per_cpu;
-  const int32_t overprovision_factor = 4;
-  const int32_t num_perf_buffer_entries = overprovision_factor * expected_stack_races;
+
+  // Because sampling occurs per-cpu, the total number of expected stack traces is:
+  const int32_t expected_stack_traces = ncpus * expected_stack_traces_per_cpu;
+
+  // Include some margin to ensure that hash collisions and data races do not cause data drop:
+  const double stack_traces_overprovision_factor = FLAGS_stirling_profiler_stack_trace_size_factor;
+
+  // Compute the size of the stack traces map.
+  const int32_t provisioned_stack_traces =
+      static_cast<int32_t>(stack_traces_overprovision_factor * expected_stack_traces);
+
+  // A threshold for checking that we've overrun the maps.
+  // This should be higher than expected_stack_traces due to timing variations,
+  // but it should be lower than provisioned_stack_traces.
+  const int32_t overrun_threshold = (expected_stack_traces + provisioned_stack_traces) / 2;
+
+  // Compute the size of the perf buffers.
+  const double perf_buffer_overprovision_factor = FLAGS_stirling_profiler_perf_buffer_size_factor;
+  const int32_t num_perf_buffer_entries =
+      static_cast<int32_t>(perf_buffer_overprovision_factor * expected_stack_traces_per_cpu);
   const int32_t perf_buffer_size = sizeof(stack_trace_key_t) * num_perf_buffer_entries;
 
-  const uint64_t probe_sample_period_ms = stack_trace_sampling_period_.count();
-  const auto probe_specs =
-      MakeArray<bpf_tools::SamplingProbeSpec>({"sample_call_stack", probe_sample_period_ms});
+  const std::vector<std::string> defines = {
+      absl::Substitute("-DCFG_STACK_TRACE_ENTRIES=$0", provisioned_stack_traces),
+      absl::Substitute("-DCFG_OVERRUN_THRESHOLD=$0", overrun_threshold),
+  };
+
+  const auto probe_specs = MakeArray<bpf_tools::SamplingProbeSpec>(
+      {"sample_call_stack", static_cast<uint64_t>(stack_trace_sampling_period_.count())});
 
   const auto perf_buffer_specs = MakeArray<bpf_tools::PerfBufferSpec>(
       {{"histogram_a", HandleHistoEvent, HandleHistoLoss, perf_buffer_size},
@@ -111,6 +143,10 @@ Status PerfProfileConnector::InitImpl() {
   // Create a symbolizer for kernel symbols.
   // Kernel symbolizer always uses BCC symbolizer.
   PL_ASSIGN_OR_RETURN(k_symbolizer_, BCCSymbolizer::Create());
+
+  if (FLAGS_stirling_profiler_java_symbols) {
+    PL_ASSIGN_OR_RETURN(u_symbolizer_, JavaSymbolizer::Create(std::move(u_symbolizer_)));
+  }
 
   if (FLAGS_stirling_profiler_cache_symbols) {
     // Add a caching layer on top of the existing symbolizer.
@@ -178,6 +214,10 @@ PerfProfileConnector::StackTraceHisto PerfProfileConnector::AggregateStackTraces
   const uint32_t asid = ctx->GetASID();
   const absl::flat_hash_set<md::UPID>& upids_for_symbolization = ctx->GetUPIDs();
 
+  // Cause symbolizers to perform any necessary updates before we put them to work.
+  u_symbolizer_->IterationPreTick();
+  k_symbolizer_->IterationPreTick();
+
   // Create a new stringifier for this iteration of the continuous perf profiler.
   Stringifier stringifier(u_symbolizer_.get(), k_symbolizer_.get(), stack_traces);
 
@@ -211,7 +251,7 @@ PerfProfileConnector::StackTraceHisto PerfProfileConnector::AggregateStackTraces
       stack_trace_str = std::string(profiler::kNotSymbolizedMessage);
     }
 
-    SymbolicStackTrace symbolic_stack_trace = {upid, std::move(stack_trace_str)};
+    profiler::SymbolicStackTrace symbolic_stack_trace = {upid, std::move(stack_trace_str)};
 
     ++symbolic_histogram[symbolic_stack_trace];
     ++cum_sum_count;
@@ -323,18 +363,26 @@ void PerfProfileConnector::TransferDataImpl(ConnectorContext* ctx,
 
 void PerfProfileConnector::PrintStats() const {
   LOG(INFO) << "PerfProfileConnector statistics: " << stats_.Print();
-  const uint64_t u_hits = u_symbolizer_->stat_hits();
-  const uint64_t k_hits = k_symbolizer_->stat_hits();
-  const uint64_t u_accesses = u_symbolizer_->stat_accesses();
-  const uint64_t k_accesses = k_symbolizer_->stat_accesses();
-  const double u_hit_rate = 100.0 * static_cast<double>(u_hits) / static_cast<double>(u_accesses);
-  const double k_hit_rate = 100.0 * static_cast<double>(k_hits) / static_cast<double>(k_accesses);
-  LOG(INFO) << absl::Substitute(
-      "PerfProfileConnector u_symbolizer hits, accesses, hit rate: $0, $1, $2%.", u_hits,
-      u_accesses, u_hit_rate);
-  LOG(INFO) << absl::Substitute(
-      "PerfProfileConnector k_symbolizer hits, accesses, hit rate: $0, $1, $2%.", k_hits,
-      k_accesses, k_hit_rate);
+  if (FLAGS_stirling_profiler_cache_symbols) {
+    auto u_symbolizer = static_cast<CachingSymbolizer*>(u_symbolizer_.get());
+    auto k_symbolizer = static_cast<CachingSymbolizer*>(k_symbolizer_.get());
+    const uint64_t u_hits = u_symbolizer->stat_hits();
+    const uint64_t k_hits = k_symbolizer->stat_hits();
+    const uint64_t u_accesses = u_symbolizer->stat_accesses();
+    const uint64_t k_accesses = k_symbolizer->stat_accesses();
+    const uint64_t u_num_symbols = u_symbolizer->GetNumberOfSymbolsCached();
+    const uint64_t k_num_symbols = k_symbolizer->GetNumberOfSymbolsCached();
+    const double u_hit_rate = 100.0 * static_cast<double>(u_hits) / static_cast<double>(u_accesses);
+    const double k_hit_rate = 100.0 * static_cast<double>(k_hits) / static_cast<double>(k_accesses);
+    LOG(INFO) << absl::Substitute(
+        "PerfProfileConnector u_symbolizer num. symbols cached, hits, accesses, hit rate: $0, $1, "
+        "$2, $3%.",
+        u_num_symbols, u_hits, u_accesses, u_hit_rate);
+    LOG(INFO) << absl::Substitute(
+        "PerfProfileConnector k_symbolizer num. symbols cached, hits, accesses, hit rate: $0, $1, "
+        "$2, $3%.",
+        k_num_symbols, k_hits, k_accesses, k_hit_rate);
+  }
 }
 
 }  // namespace stirling

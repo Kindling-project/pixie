@@ -34,8 +34,8 @@ import {
   TableHead,
   TableRow,
 } from '@mui/material';
-import { Theme } from '@mui/material/styles';
-import { createStyles, makeStyles, withStyles } from '@mui/styles';
+import { Theme, styled } from '@mui/material/styles';
+import { createStyles, makeStyles } from '@mui/styles';
 import { distanceInWords } from 'date-fns';
 import { useHistory, useParams } from 'react-router';
 import { Link } from 'react-router-dom';
@@ -97,7 +97,8 @@ const useBreadcrumbsStyles = makeStyles((theme: Theme) => createStyles({
     fontWeight: 1000,
     width: theme.spacing(1),
   },
-}));
+}), { name: 'ClusterDetailsBreadcrumbs' });
+
 const StyledBreadcrumbs: React.FC = React.memo(({ children }) => {
   const classes = useBreadcrumbsStyles();
   return (
@@ -272,13 +273,11 @@ const usePodRowStyles = makeStyles((theme: Theme) => createStyles({
   },
 }));
 
-const StyledSmallTableCell = withStyles((theme: Theme) => createStyles({
-  root: {
-    fontWeight: theme.typography.fontWeightLight,
-    backgroundColor: theme.palette.foreground.grey2,
-    borderWidth: 0,
-  },
-}))(StyledTableCell);
+const StyledSmallTableCell = styled(StyledTableCell, { name: 'SmallTableCell' })(({ theme }) => ({
+  fontWeight: theme.typography.fontWeightLight,
+  backgroundColor: theme.palette.foreground.grey2,
+  borderWidth: 0,
+}));
 
 // combineReasonAndMessage returns a combination of a reason and a message. These fields are
 // used by Kubernetes to detail state However, we don't need to separate them when we
@@ -383,7 +382,7 @@ const useClusterDetailStyles = makeStyles((theme: Theme) => createStyles({
     margin: theme.spacing(1),
   },
   tableContainer: {
-    maxHeight: 800,
+    maxHeight: theme.spacing(100),
   },
   podTypeHeader: {
     ...theme.typography.h6,
@@ -585,14 +584,15 @@ const ClusterDetailsNavigationBreadcrumbs = ({ selectedClusterName }) => {
   const { data, loading, error } = useQuery<{
     clusters: Pick<GQLClusterInfo, 'clusterName' | 'prettyClusterName' | 'status'>[],
   }>(gql`
-        query clusterNavigationData{
-            clusters {
-                clusterName
-                prettyClusterName
-                status
-            }
-        }
-      `, {});
+    query clusterNavigationData{
+      clusters {
+        id
+        clusterName
+        prettyClusterName
+        status
+      }
+    }
+  `, {});
   const clusters = data?.clusters;
 
   if (loading || error || !clusters) {

@@ -127,7 +127,6 @@ TEST_F(ProcParserTest, ParseStat) {
 
 TEST_F(ProcParserTest, ParseMemInfo) {
   ProcParser::SystemStats stats;
-  auto test_file = GetPathToTestDataFile("testdata/proc/sample_proc_meminfo");
   PL_CHECK_OK(parser_->ParseProcMemInfo(&stats));
 
   // The expected values are from the test file above.
@@ -141,6 +140,107 @@ TEST_F(ProcParserTest, ParseMemInfo) {
 
   EXPECT_EQ(28388524032, stats.mem_active_bytes);
   EXPECT_EQ(15734595584, stats.mem_inactive_bytes);
+}
+
+TEST_F(ProcParserTest, ParsePIDStatus) {
+  ProcParser::ProcessStatus stats;
+  PL_CHECK_OK(parser_->ParseProcPIDStatus(789, &stats));
+
+  EXPECT_EQ(24612 * 1024, stats.vm_peak_bytes);
+  EXPECT_EQ(24612 * 1024, stats.vm_size_bytes);
+  EXPECT_EQ(0 * 1024, stats.vm_lck_bytes);
+  EXPECT_EQ(0 * 1024, stats.vm_pin_bytes);
+  EXPECT_EQ(9936 * 1024, stats.vm_hwm_bytes);
+  EXPECT_EQ(9900 * 1024, stats.vm_rss_bytes);
+  EXPECT_EQ(3520 * 1024, stats.rss_anon_bytes);
+  EXPECT_EQ(6380 * 1024, stats.rss_file_bytes);
+  EXPECT_EQ(0 * 1024, stats.rss_shmem_bytes);
+  EXPECT_EQ(3640 * 1024, stats.vm_data_bytes);
+  EXPECT_EQ(132 * 1024, stats.vm_stk_bytes);
+  EXPECT_EQ(2044 * 1024, stats.vm_exe_bytes);
+  EXPECT_EQ(5868 * 1024, stats.vm_lib_bytes);
+  EXPECT_EQ(76 * 1024, stats.vm_pte_bytes);
+  EXPECT_EQ(0 * 1024, stats.vm_swap_bytes);
+  EXPECT_EQ(0 * 1024, stats.hugetlb_pages_bytes);
+
+  EXPECT_EQ(2, stats.voluntary_ctxt_switches);
+  EXPECT_EQ(2, stats.nonvoluntary_ctxt_switches);
+}
+
+TEST_F(ProcParserTest, ParsePIDStatusBadUnit) {
+  ProcParser::ProcessStatus stats;
+  PL_CHECK_OK(parser_->ParseProcPIDStatus(1, &stats));
+
+  // Bad units.
+  EXPECT_EQ(-1, stats.vm_peak_bytes);
+  // Bad units.
+  EXPECT_EQ(-1, stats.vm_size_bytes);
+  // Missing key.
+  EXPECT_EQ(0, stats.vm_lck_bytes);
+  // Exists, and units OK.
+  EXPECT_EQ(1 * 1024, stats.vm_pin_bytes);
+  // Exists, and no units.
+  EXPECT_EQ(123, stats.voluntary_ctxt_switches);
+}
+
+TEST_F(ProcParserTest, ParsePIDSMaps) {
+  std::vector<ProcParser::ProcessSMaps> stats;
+  PL_CHECK_OK(parser_->ParseProcPIDSMaps(789, &stats));
+
+  EXPECT_EQ(stats.size(), 5);
+
+  ASSERT_GT(stats.size(), 0);
+  auto& first = stats.front();
+  EXPECT_EQ("55e816b37000-55e816b65000", first.address);
+  EXPECT_EQ("00000000", first.offset);
+  EXPECT_EQ("/usr/bin/vim.basic", first.pathname);
+  EXPECT_EQ(184 * 1024, first.size_bytes);
+  EXPECT_EQ(4 * 1024, first.kernel_page_size_bytes);
+  EXPECT_EQ(4 * 1024, first.mmu_page_size_bytes);
+  EXPECT_EQ(184 * 1024, first.rss_bytes);
+  EXPECT_EQ(184 * 1024, first.pss_bytes);
+  EXPECT_EQ(0 * 1024, first.shared_clean_bytes);
+  EXPECT_EQ(0 * 1024, first.shared_dirty_bytes);
+  EXPECT_EQ(184 * 1024, first.private_clean_bytes);
+  EXPECT_EQ(0 * 1024, first.private_dirty_bytes);
+  EXPECT_EQ(184 * 1024, first.referenced_bytes);
+  EXPECT_EQ(0 * 1024, first.anonymous_bytes);
+  EXPECT_EQ(0 * 1024, first.lazy_free_bytes);
+  EXPECT_EQ(0 * 1024, first.anon_huge_pages_bytes);
+  EXPECT_EQ(0 * 1024, first.shmem_pmd_mapped_bytes);
+  EXPECT_EQ(0 * 1024, first.file_pmd_mapped_bytes);
+  EXPECT_EQ(0 * 1024, first.shared_hugetlb_bytes);
+  EXPECT_EQ(0 * 1024, first.private_hugetlb_bytes);
+  EXPECT_EQ(0 * 1024, first.swap_bytes);
+  EXPECT_EQ(0 * 1024, first.swap_pss_bytes);
+  EXPECT_EQ(0 * 1024, first.locked_bytes);
+
+  auto& last = stats.back();
+  EXPECT_EQ("ffffffffff600000-ffffffffff601000", last.address);
+  EXPECT_EQ("00000000", last.offset);
+  EXPECT_EQ("[vsyscall]", last.pathname);
+  EXPECT_EQ(4 * 1024, last.size_bytes);
+  EXPECT_EQ(4 * 1024, last.kernel_page_size_bytes);
+  EXPECT_EQ(4 * 1024, last.mmu_page_size_bytes);
+  EXPECT_EQ(0 * 1024, last.rss_bytes);
+  EXPECT_EQ(0 * 1024, last.pss_bytes);
+  EXPECT_EQ(0 * 1024, last.shared_clean_bytes);
+  EXPECT_EQ(0 * 1024, last.shared_dirty_bytes);
+  EXPECT_EQ(0 * 1024, last.private_clean_bytes);
+  EXPECT_EQ(0 * 1024, last.private_dirty_bytes);
+  EXPECT_EQ(0 * 1024, last.referenced_bytes);
+  EXPECT_EQ(0 * 1024, last.anonymous_bytes);
+  EXPECT_EQ(0 * 1024, last.lazy_free_bytes);
+  EXPECT_EQ(0 * 1024, last.anon_huge_pages_bytes);
+  EXPECT_EQ(0 * 1024, last.shmem_pmd_mapped_bytes);
+  EXPECT_EQ(0 * 1024, last.file_pmd_mapped_bytes);
+  EXPECT_EQ(0 * 1024, last.shared_hugetlb_bytes);
+  EXPECT_EQ(0 * 1024, last.private_hugetlb_bytes);
+  EXPECT_EQ(0 * 1024, last.swap_bytes);
+  EXPECT_EQ(0 * 1024, last.swap_pss_bytes);
+  EXPECT_EQ(0 * 1024, last.locked_bytes);
+
+  EXPECT_EQ("[anonymous]", stats[3].pathname);
 }
 
 TEST_F(ProcParserTest, read_pid_start_time) {

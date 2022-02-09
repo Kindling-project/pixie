@@ -172,10 +172,11 @@ const SetupOrganization = React.memo<{ redirectUri: string }>(({ redirectUri }) 
 
   const [createOrgMutation] = useMutation<{ CreateOrg: string }, { orgName: string }>(
     gql`
-    mutation CreateOrgFromSetupOrgPage($orgName: String!){
-      CreateOrg(orgName: $orgName)
-    }
-  `);
+      mutation CreateOrgFromSetupOrgPage($orgName: String!) {
+        CreateOrg(orgName: $orgName)
+      }
+    `,
+  );
 
   const createOrg = React.useCallback(() => {
     if (!valid) return;

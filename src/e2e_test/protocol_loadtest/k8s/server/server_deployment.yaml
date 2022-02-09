@@ -1,0 +1,30 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: px-protocol-loadtest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: server
+  template:
+    metadata:
+      labels:
+        name: server
+    spec:
+      containers:
+      - name: app
+        image: gcr.io/pixie-oss/pixie-dev/experimental/protocol_loadtest_server:latest
+        env:
+        - name: HTTP_PORT
+          value: "8080"
+        - name: HTTP_SSL_PORT
+          value: "8081"
+        - name: HTTP_NUM_BYTES_HEADERS
+          value: "8192"
+        - name: HTTP_NUM_BYTES_BODY
+          value: "122880"  # 120kB
+        - name: GRPC_PORT
+          value: "9080"

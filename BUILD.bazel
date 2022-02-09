@@ -70,6 +70,7 @@ gazelle(
 # gazelle:resolve go px.dev/pixie/src/cloud/vzconn/vzconnpb //src/cloud/vzconn/vzconnpb:service_pl_go_proto
 # gazelle:resolve go px.dev/pixie/src/cloud/vzmgr/vzmgrpb //src/cloud/vzmgr/vzmgrpb:service_pl_go_proto
 # gazelle:resolve go px.dev/pixie/src/common/base/statuspb //src/common/base/statuspb:status_pl_go_proto
+# gazelle:resolve go px.dev/pixie/src/e2e_test/protocol_loadtest/grpc/loadtestpb //src/e2e_test/protocol_loadtest/grpc/loadtestpb:service_pl_go_proto
 # gazelle:resolve go px.dev/pixie/src/shared/artifacts/versionspb //src/shared/artifacts/versionspb:versions_pl_go_proto
 # gazelle:resolve go px.dev/pixie/src/shared/bloomfilterpb //src/shared/bloomfilterpb:bloomfilter_pl_go_proto
 # gazelle:resolve go px.dev/pixie/src/shared/cvmsgspb //src/shared/cvmsgspb:cvmsgs_pl_go_proto
@@ -180,15 +181,18 @@ linux_timeconst_files = [
     "@timeconst_1000//file:file",
 ]
 
-stirling_ctrl_files = [
+stirling_collateral = [
     "//src/stirling/binaries:stirling_ctrl",
+    # TODO(jps): Find a way to package the agent lib .so files w/ Stirling vs. PEM image.
+    "//src/stirling/source_connectors/perf_profiler/java/agent:musl",
+    "//src/stirling/source_connectors/perf_profiler/java/agent:glibc",
 ]
 
 container_image(
     name = "pl_cc_bpf_image",
     base = ":pl_cc_base_image",
     directory = "/pl",
-    files = linux_headers_tarballs + linux_timeconst_files + stirling_ctrl_files,
+    files = linux_headers_tarballs + linux_timeconst_files + stirling_collateral,
     visibility = ["//visibility:public"],
 )
 
@@ -196,7 +200,7 @@ container_image(
     name = "pl_cc_bpf_debug_image",
     base = ":pl_cc_base_debug_image",
     directory = "/pl",
-    files = linux_headers_tarballs + linux_timeconst_files + stirling_ctrl_files,
+    files = linux_headers_tarballs + linux_timeconst_files + stirling_collateral,
     visibility = ["//visibility:public"],
 )
 

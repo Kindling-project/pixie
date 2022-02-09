@@ -92,7 +92,7 @@ func mustInitEtcdDatastore() (*etcd.DataStore, func()) {
 		TLS:         tlsConfig,
 	})
 	if err != nil {
-		log.WithError(err).Fatalf("Failed to connect to etcd at %s", viper.GetString("md_etcd_server"))
+		log.WithError(err).Fatalf("Failed to connect to etcd at %s. Please check status and logs for `pl-etcd` pods in the cluster.", viper.GetString("md_etcd_server"))
 	}
 
 	etcdMgr := controllers.NewEtcdManager(etcdClient)
@@ -108,7 +108,7 @@ func mustInitPebbleDatastore() *pebbledb.DataStore {
 	log.Infof("Using pebbledb: %s for metadata", pebbleOpenDir)
 	pebbleDb, err := pebble.Open(pebbleOpenDir, &pebble.Options{})
 	if err != nil {
-		log.WithError(err).Fatal("Failed to open pebble database.")
+		log.WithError(err).Fatal("Failed to open pebble database. If out of space, increase the storage size of the `metadata-pv-claim` PersistentVolumeClaim and restart the vizier-metadata pod")
 	}
 	return pebbledb.New(pebbleDb, pebbledbTTLDuration)
 }
@@ -150,7 +150,7 @@ func main() {
 	}
 
 	if err != nil {
-		log.WithError(err).Fatal("Could not connect to NATS")
+		log.WithError(err).Fatal("Could not connect to NATS. Please check for the `pl-nats` pods in the namespace to confirm they are healthy and running.")
 	}
 
 	nc.SetErrorHandler(func(conn *nats.Conn, subscription *nats.Subscription, err error) {

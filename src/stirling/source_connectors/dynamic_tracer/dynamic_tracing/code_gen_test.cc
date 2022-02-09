@@ -22,8 +22,7 @@
 
 #include "src/common/testing/testing.h"
 
-constexpr std::string_view kBinaryPath =
-    "src/stirling/obj_tools/testdata/go/test_go_binary_/test_go_binary";
+constexpr std::string_view kBinaryPath = "src/stirling/obj_tools/testdata/go/test_go_binary";
 
 namespace px {
 namespace stirling {

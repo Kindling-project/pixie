@@ -16,9 +16,16 @@
 
 load("@io_bazel_rules_docker//container:container.bzl", "container_image")
 load("@io_bazel_rules_docker//docker/util:run.bzl", "container_run_and_extract")
-load("//bazel:pl_build_system.bzl", "pl_cc_test")
+load("//bazel:pl_build_system.bzl", "pl_cc_library", "pl_cc_test")
 
 package(default_visibility = ["//src/stirling:__subpackages__"])
+
+pl_cc_library(
+    # This is a "header only" pl_cc_library: agent.cc is used to create a .so that will be injected
+    # to a target Java process.
+    name = "cc_headers",
+    hdrs = glob(["*.h"]),
+)
 
 container_image(
     name = "image-glibc",
@@ -51,8 +58,9 @@ container_run_and_extract(
         "apt-get install -y clang",
         "export INNER_JDK_PATH=/usr/local/openjdk-18",
         "make -C build -f Makefile.inner agent.so",
+        "cp build/agent.so /lib-px-java-agent-glibc.so",
     ],
-    extract_file = "/build/agent.so",
+    extract_file = "/lib-px-java-agent-glibc.so",
     image = ":image-glibc.tar",
 )
 
@@ -65,19 +73,32 @@ container_run_and_extract(
         "apk --no-cache add clang",
         "export INNER_JDK_PATH=/opt/openjdk-18",
         "make -C build -f Makefile.inner agent.so",
+        "cp build/agent.so /lib-px-java-agent-musl.so",
     ],
-    extract_file = "/build/agent.so",
+    extract_file = "/lib-px-java-agent-musl.so",
     image = ":image-musl.tar",
 )
 
 filegroup(
     name = "glibc",
-    srcs = ["build-glibc/build/agent.so"],
+    srcs = ["build-glibc/lib-px-java-agent-glibc.so"],
+    visibility = [
+        # Add visibility at top-level so that we can include
+        # the lib in the pem image.
+        "//:__pkg__",
+        "//src/stirling:__subpackages__",
+    ],
 )
 
 filegroup(
     name = "musl",
-    srcs = ["build-musl/build/agent.so"],
+    srcs = ["build-musl/lib-px-java-agent-musl.so"],
+    visibility = [
+        # Add visibility at top-level so that we can include
+        # the lib in the pem image.
+        "//:__pkg__",
+        "//src/stirling:__subpackages__",
+    ],
 )
 
 pl_cc_test(
@@ -85,7 +106,7 @@ pl_cc_test(
     srcs = ["agent_test.cc"],
     data = [
         "//src/stirling/source_connectors/perf_profiler/java/agent:glibc",
-        "//src/stirling/source_connectors/perf_profiler/java/testing:fib",
+        "//src/stirling/source_connectors/perf_profiler/testing/java:fib_with_agent",
     ],
     tags = [
         "exclusive",

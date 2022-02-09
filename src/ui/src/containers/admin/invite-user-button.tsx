@@ -29,10 +29,10 @@ import {
 } from '@mui/material';
 import { Theme } from '@mui/material/styles';
 import { createStyles, makeStyles } from '@mui/styles';
-import { useFlags } from 'launchdarkly-react-client-sdk';
 
 import OrgContext from 'app/common/org-context';
 import { useSnackbar } from 'app/components';
+import { OAUTH_PROVIDER } from 'app/containers/constants';
 import { GQLOrgInfo } from 'app/types/schema';
 import pixieAnalytics from 'app/utils/analytics';
 import { getRedirectPath } from 'app/utils/redirect-utils';
@@ -84,20 +84,23 @@ export const InviteUserButton = React.memo<InviteUserButtonProps>(({
   const [open, setOpen] = React.useState(false);
   const [getOrg, { data: orgData, loading: orgLoading }] = useLazyQuery<{
     org: Pick<GQLOrgInfo, 'id'>
-  }>(gql`
+  }>(
+    gql`
       query getOrgInfoOnInviteButton {
         org {
           id
         }
       }
-    `);
+    `,
+  );
 
   const [createInviteToken, { data: inviteTokenData }] = useMutation<{ CreateInviteToken: string }, { id: string }>(
     gql`
-    mutation CreateInviteToken($id: ID!) {
-      CreateInviteToken(orgID: $id)
-    }
-  `);
+      mutation CreateInviteToken($id: ID!) {
+        CreateInviteToken(orgID: $id)
+      }
+    `,
+  );
 
   const { org: { domainName } } = React.useContext(OrgContext);
 
@@ -149,8 +152,7 @@ export const InviteUserButton = React.memo<InviteUserButtonProps>(({
     }
   }, [invitationLink, showSnackbar]);
 
-  const { invite: invitationsEnabled } = useFlags();
-  if (!invitationsEnabled) return <></>;
+  if (OAUTH_PROVIDER !== 'auth0') return <></>;
 
   return (
     <>
