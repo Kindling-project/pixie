@@ -36,19 +36,10 @@ load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
 
 grpc_deps()
 
-<<<<<<< HEAD
 load("@com_github_jupp0r_prometheus_cpp//bazel:repositories.bzl", "prometheus_cpp_repositories")
 
 prometheus_cpp_repositories()
 
-load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
-
-go_rules_dependencies()
-
-go_register_toolchains(go_version = "1.16")
-
-=======
->>>>>>> upstream/main
 load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
 
 scala_version = "2.13.6"
