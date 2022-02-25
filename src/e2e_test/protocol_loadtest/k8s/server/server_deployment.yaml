@@ -16,15 +16,22 @@ spec:
     spec:
       containers:
       - name: app
-        image: gcr.io/pixie-oss/pixie-dev/experimental/protocol_loadtest_server:latest
+        image: gcr.io/pixie-oss/pixie-dev/src/e2e_test/protocol_loadtest/protocol_loadtest_server_image:latest
         env:
         - name: HTTP_PORT
           value: "8080"
         - name: HTTP_SSL_PORT
           value: "8081"
-        - name: HTTP_NUM_BYTES_HEADERS
-          value: "8192"
-        - name: HTTP_NUM_BYTES_BODY
-          value: "122880"  # 120kB
         - name: GRPC_PORT
           value: "9080"
+        - name: GRPC_SSL_PORT
+          value: "9081"
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 8081
+          name: https
+        - containerPort: 9080
+          name: grpc
+        - containerPort: 9081
+          name: grpcs

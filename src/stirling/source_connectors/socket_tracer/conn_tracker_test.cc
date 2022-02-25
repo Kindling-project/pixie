@@ -18,6 +18,7 @@
 
 #include "src/stirling/source_connectors/socket_tracer/conn_tracker.h"
 
+#include <chrono>
 #include <tuple>
 
 #include <gmock/gmock.h>
@@ -26,6 +27,7 @@
 
 #include <magic_enum.hpp>
 
+#include "protocols/http/types.h"
 #include "src/common/base/test_utils.h"
 #include "src/stirling/source_connectors/socket_tracer/conn_stats.h"
 #include "src/stirling/source_connectors/socket_tracer/protocols/mysql/test_utils.h"
@@ -77,6 +79,7 @@ TEST_F(ConnTrackerTest, timestamp_test) {
   struct socket_control_event_t close_event = event_gen.InitClose();
 
   ConnTracker tracker;
+  tracker.InitProtocolState<http::StateWrapper>();
   EXPECT_EQ(0, tracker.last_bpf_timestamp_ns());
   tracker.AddControlEvent(conn);
   EXPECT_EQ(1, tracker.last_bpf_timestamp_ns());
@@ -108,6 +111,7 @@ TEST_F(ConnTrackerTest, ReqRespMatchingSimple) {
   struct socket_control_event_t close_event = event_gen.InitClose();
 
   ConnTracker tracker;
+  tracker.InitProtocolState<http::StateWrapper>();
   tracker.AddControlEvent(conn);
   tracker.AddDataEvent(std::move(req0));
   tracker.AddDataEvent(std::move(resp0));
@@ -143,6 +147,7 @@ TEST_F(ConnTrackerTest, DISABLED_ReqRespMatchingPipelined) {
   struct socket_control_event_t close_event = event_gen.InitClose();
 
   ConnTracker tracker;
+  tracker.InitProtocolState<http::StateWrapper>();
   tracker.AddControlEvent(conn);
   tracker.AddDataEvent(std::move(req0));
   tracker.AddDataEvent(std::move(req1));
@@ -178,6 +183,7 @@ TEST_F(ConnTrackerTest, ReqRespMatchingSerializedMissingRequest) {
   struct socket_control_event_t close_event = event_gen.InitClose();
 
   ConnTracker tracker;
+  tracker.InitProtocolState<http::StateWrapper>();
   tracker.AddControlEvent(conn);
   tracker.AddDataEvent(std::move(req0));
   tracker.AddDataEvent(std::move(resp0));
@@ -210,6 +216,7 @@ TEST_F(ConnTrackerTest, ReqRespMatchingSerializedMissingResponse) {
   struct socket_control_event_t close_event = event_gen.InitClose();
 
   ConnTracker tracker;
+  tracker.InitProtocolState<http::StateWrapper>();
   tracker.AddControlEvent(conn);
   tracker.AddDataEvent(std::move(req0));
   tracker.AddDataEvent(std::move(resp0));
@@ -246,6 +253,7 @@ TEST_F(ConnTrackerTest, TrackerDisable) {
   struct socket_control_event_t close_event = event_gen.InitClose();
 
   ConnTracker tracker;
+  tracker.InitProtocolState<http::StateWrapper>();
   std::vector<http::Record> records;
 
   tracker.AddControlEvent(conn);
@@ -296,6 +304,7 @@ TEST_F(ConnTrackerTest, TrackerHTTP101Disable) {
   struct socket_control_event_t close_event = event_gen.InitClose();
 
   ConnTracker tracker;
+  tracker.InitProtocolState<http::StateWrapper>();
   std::vector<http::Record> records;
 
   tracker.AddControlEvent(conn);
@@ -356,6 +365,49 @@ TEST_F(ConnTrackerTest, DataEventsChangesCounter) {
 
   EXPECT_EQ(kHTTPReq0.size(), tracker.GetStat(ConnTracker::StatKey::kBytesRecv));
   EXPECT_EQ(kHTTPResp0.size(), tracker.GetStat(ConnTracker::StatKey::kBytesSent));
+}
+
+TEST_F(ConnTrackerTest, MemUsage) {
+  testing::MockClock mock_clock;
+  testing::EventGenerator event_gen(&mock_clock);
+  struct socket_control_event_t conn = event_gen.InitConn(kRoleServer);
+  auto frame0 = event_gen.InitRecvEvent<kProtocolHTTP>(kHTTPReq0);
+  auto frame1 = event_gen.InitSendEvent<kProtocolHTTP>(kHTTPResp0);
+
+  ConnTracker tracker;
+  tracker.InitFrames<http::Message>();
+
+  // Initial memory use is not 0, because the DataStreamBuffer has a small initial capacity.
+  size_t mem_usage = tracker.MemUsage<http::ProtocolTraits>();
+  EXPECT_GT(mem_usage, 0);
+  EXPECT_LT(mem_usage, 50);
+
+  // After adding events, the size should reflect that.
+  tracker.AddControlEvent(std::move(conn));
+  tracker.AddDataEvent(std::move(frame0));
+  mem_usage = tracker.MemUsage<http::ProtocolTraits>();
+  EXPECT_GE(mem_usage, kHTTPReq0.size());
+
+  // ProcessToRecords should move the data to the parsed messages,
+  // but since the response has not arrived yet, most of the memory should still be used.
+  tracker.ProcessToRecords<http::ProtocolTraits>();
+  mem_usage = tracker.MemUsage<http::ProtocolTraits>();
+  EXPECT_GE(mem_usage, kHTTPReq0.size());
+
+  // Second event should increase the size further.
+  tracker.AddDataEvent(std::move(frame1));
+  mem_usage = tracker.MemUsage<http::ProtocolTraits>();
+  EXPECT_GE(mem_usage, kHTTPReq0.size() + kHTTPResp0.size());
+
+  // This iteration of ProcessToRecords should output a record and the size should go back to zero.
+  tracker.ProcessToRecords<http::ProtocolTraits>();
+  // Set expiry_timestamp to 0 to prevent Cleanup from expiring data based on timestamp.
+  std::chrono::time_point<std::chrono::steady_clock> expiry_timestamp;
+  tracker.Cleanup<http::ProtocolTraits>(1024 * 1024, 1024 * 1024, expiry_timestamp,
+                                        expiry_timestamp);
+  mem_usage = tracker.MemUsage<http::ProtocolTraits>();
+  EXPECT_GT(mem_usage, 0);
+  EXPECT_LT(mem_usage, 50);
 }
 
 TEST_F(ConnTrackerTest, BufferClearedAfterExpiration) {

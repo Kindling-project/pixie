@@ -44,6 +44,7 @@ using ::px::ProcessStatsMonitor;
 using ::px::Status;
 using ::px::StatusOr;
 
+using ::px::stirling::CreateSourceRegistryFromFlag;
 using ::px::stirling::IndexPublication;
 using ::px::stirling::SourceConnectorGroup;
 using ::px::stirling::SourceRegistry;
@@ -57,17 +58,12 @@ using ::px::types::TabletID;
 using DynamicTracepointDeployment =
     ::px::stirling::dynamic_tracing::ir::logical::TracepointDeployment;
 
-DEFINE_string(
-    sources, "kProd",
-    "Choose sources to enable. [kAll|kProd|kMetrics|kTracers|kProfiler] or comma separated list of "
-    "sources (find them the header files of source connector classes).");
 DEFINE_string(trace, "",
               "Dynamic trace to deploy. Either (1) the path to a file containing PxL or IR trace "
               "spec, or (2) <path to object file>:<symbol_name> for full-function tracing.");
 DEFINE_string(print_record_batches,
               "http_events,mysql_events,pgsql_events,redis_events,cql_events,dns_events",
-              "Comma-separated list of tables to print. Defaults to tracers if not specified. Use "
-              "'None' for none.");
+              "Comma-separated list of tables to print.");
 DEFINE_bool(init_only, false, "If true, only runs the init phase and exits. For testing.");
 DEFINE_int32(timeout_secs, -1,
              "If non-negative, only runs for the specified amount of time and exits.");
@@ -279,32 +275,16 @@ int main(int argc, char** argv) {
     // In dynamic tracing mode, don't load any other sources.
     // Presumably, user only wants their dynamic trace.
     LOG(INFO) << "Dynamic Trace provided. All other data sources will be disabled.";
-    FLAGS_sources = "";
+    FLAGS_stirling_sources = "";
   }
-
-  std::vector<std::string_view> source_names;
-
-  if (!FLAGS_sources.empty()) {
-    std::optional<SourceConnectorGroup> group =
-        magic_enum::enum_cast<SourceConnectorGroup>(FLAGS_sources);
-    if (group.has_value()) {
-      source_names = GetSourceNamesForGroup(group.value());
-    } else {
-      source_names = absl::StrSplit(FLAGS_sources, ",", absl::SkipWhitespace());
-    }
-  }
-
-  std::unique_ptr<SourceRegistry> registry =
-      px::stirling::CreateSourceRegistry(source_names).ConsumeValueOrDie();
 
   if (!FLAGS_print_record_batches.empty()) {
-    // controls which tables are dumped to STDOUT
-    // this concept is specific to stirling wrapper (otherwise everything goes to the table store)
+    // Controls which tables are dumped to STDOUT in stirling_wrapper.
     g_table_print_enables = absl::StrSplit(FLAGS_print_record_batches, ",", absl::SkipWhitespace());
   }
 
   // Make Stirling.
-  std::unique_ptr<Stirling> stirling = Stirling::Create(std::move(registry));
+  std::unique_ptr<Stirling> stirling = Stirling::Create(CreateSourceRegistryFromFlag());
   g_stirling = stirling.get();
 
   // Enable use of USR1/USR2 for controlling debug.

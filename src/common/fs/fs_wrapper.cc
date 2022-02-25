@@ -101,16 +101,22 @@ Status CreateSymlinkIfNotExists(const std::filesystem::path& target,
   return Status::OK();
 }
 
+bool Exists(const std::filesystem::path& path) {
+  std::error_code ec;
+  bool exists = std::filesystem::exists(path, ec);
+  if (ec) {
+    // This is very unlikely, so we just log an error and return false;
+    LOG(DFATAL) << absl::Substitute("OS API error on path $0 [ec=$1]", path.string(), ec.message());
+    return false;
+  }
+  return exists;
+}
+
 #define WRAP_BOOL_FN(expr) \
   std::error_code ec;      \
   if (expr) {              \
     return Status::OK();   \
   }
-
-Status Exists(const std::filesystem::path& path) {
-  WRAP_BOOL_FN(std::filesystem::exists(path, ec));
-  return error::InvalidArgument("Path $0 does not exist [ec=$1]", path.string(), ec.message());
-}
 
 Status Copy(const std::filesystem::path& from, const std::filesystem::path& to,
             std::filesystem::copy_options options) {
@@ -119,9 +125,14 @@ Status Copy(const std::filesystem::path& from, const std::filesystem::path& to,
                                 ec.message());
 }
 
-Status Remove(const std::filesystem::path& f) {
-  WRAP_BOOL_FN(std::filesystem::remove(f, ec));
-  return error::InvalidArgument("Could not delete $0 [ec=$1]", f.string(), ec.message());
+Status Remove(const std::filesystem::path& path) {
+  WRAP_BOOL_FN(std::filesystem::remove(path, ec));
+  return error::InvalidArgument("Could not delete $0 [ec=$1]", path.string(), ec.message());
+}
+
+Status RemoveAll(const std::filesystem::path& path) {
+  WRAP_BOOL_FN(std::filesystem::remove_all(path, ec));
+  return error::InvalidArgument("Could not delete $0 [ec=$1]", path.string(), ec.message());
 }
 
 Status Chown(const std::filesystem::path& path, const uid_t uid, const gid_t gid) {

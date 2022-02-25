@@ -49,12 +49,11 @@
 // sampling period of 5 seconds, and other tables' 100 milliseconds.
 DEFINE_uint32(
     stirling_conn_stats_sampling_ratio, 50,
-    "Ratio of how frequently conn_stats_table is populated relative to the base sampling period");
-// The default frequency logs every minute, since each iteration has a cycle period of 200ms.
-DEFINE_uint32(
-    stirling_socket_tracer_stats_logging_ratio,
-    std::chrono::minutes(10) / px::stirling::SocketTraceConnector::kSamplingPeriod,
-    "Ratio of how frequently conn_stats_table is populated relative to the base sampling period");
+    "Ratio of how frequently conn_stats_table is populated relative to the base sampling period.");
+
+DEFINE_uint32(stirling_socket_tracer_stats_logging_ratio,
+              std::chrono::minutes(10) / px::stirling::SocketTraceConnector::kSamplingPeriod,
+              "Ratio of how frequently summary logging information is displayed.");
 
 DEFINE_bool(stirling_enable_periodic_bpf_map_cleanup, true,
             "Disable periodic BPF map cleanup (for testing)");
@@ -99,7 +98,6 @@ DEFINE_bool(stirling_disable_self_tracing, true,
 // Assume a moderate default network bandwidth peak of 100MiB/s across socket connections for data.
 DEFINE_uint32(stirling_socket_tracer_target_data_bw_percpu, 100 * 1024 * 1024,
               "Target bytes/sec of data per CPU");
-
 // Assume a default of 5MiB/s across socket connections for control events.
 DEFINE_uint32(stirling_socket_tracer_target_control_bw_percpu, 5 * 1024 * 1024,
               "Target bytes/sec of control events per CPU");
@@ -113,6 +111,15 @@ DEFINE_double(
     "Values in between trade-off between these two extremes in a way that prunes back "
     "memory usage more aggressively for high core counts. "
     "8 is the default to curb memory use in perf buffers for CPUs with high core counts.");
+
+DEFINE_uint64(stirling_socket_tracer_max_total_data_bw,
+              static_cast<uint64_t>(10 * 1024 * 1024) * 1024 / 8 /*10Gibit/s*/,
+              "Maximum total bytes/sec of data.");
+DEFINE_uint64(stirling_socket_tracer_max_total_control_bw, 512 * 1024 * 1024 / 8 /*512Mibit/s*/,
+              "Maximum total bytes/sec of control events.");
+DEFINE_double(stirling_socket_tracer_max_total_bw_overprovision_factor, 1,
+              "Factor to overprovision maximum total bandwidth, to account for the fact that "
+              "traffic won't be exactly evenly distributed over all cpus.");
 
 DEFINE_uint32(messages_expiry_duration_secs, 1 * 60,
               "The duration after which a parsed message is erased.");
@@ -187,10 +194,6 @@ void SocketTraceConnector::InitProtocolTransferSpecs() {
                                    kNATSTableNum,
                                    {kRoleClient, kRoleServer},
                                    TRANSFER_STREAM_PROTOCOL(nats)}},
-      // TODO(chengruizhe): Add Mongo table. nullptr should be replaced by the transfer_fn for
-      // mongo in the future.
-      {kProtocolMongo,
-       TransferSpec{false, kHTTPTableNum, {kRoleUnknown, kRoleClient, kRoleServer}, nullptr}},
       {kProtocolKafka, TransferSpec{FLAGS_stirling_enable_kafka_tracing,
                                     kKafkaTableNum,
                                     {kRoleClient, kRoleServer},
@@ -199,13 +202,15 @@ void SocketTraceConnector::InitProtocolTransferSpecs() {
                                   kMuxTableNum,
                                   {kRoleClient, kRoleServer},
                                   TRANSFER_STREAM_PROTOCOL(mux)}},
-      {kProtocolUnknown, TransferSpec{false /*enabled*/,
-                                      // Unknown protocols attached to HTTP table so that they run
-                                      // their cleanup functions, but the use of nullptr transfer_fn
-                                      // means it won't actually transfer data to the HTTP table.
-                                      kHTTPTableNum,
-                                      {kRoleUnknown, kRoleClient, kRoleServer},
-                                      nullptr /*transfer_fn*/}}};
+      // TODO(chengruizhe): Update Mongo after implementing protocol parsers.
+      {kProtocolMongo, TransferSpec{/* enabled */ false,
+                                    /* table_num */ static_cast<uint32_t>(-1),
+                                    /* trace_roles */ {},
+                                    /* transfer_fn */ nullptr}},
+      {kProtocolUnknown, TransferSpec{/*enabled*/ false,
+                                      /* table_num */ static_cast<uint32_t>(-1),
+                                      /* trace_roles */ {},
+                                      /* transfer_fn */ nullptr}}};
 #undef TRANSFER_STREAM_PROTOCOL
 
   for (uint64_t i = 0; i < kNumProtocols; ++i) {
@@ -263,6 +268,49 @@ const auto kProbeSpecs = MakeArray<bpf_tools::KProbeSpec>(
      {"security_socket_recvmsg", ProbeType::kEntry, "probe_entry_security_socket_recvmsg",
       /*is_syscall*/ false}});
 
+using bpf_tools::PerfBufferSizeCategory;
+
+namespace {
+// Resize each category of perf buffers such that it doesn't exceed a maximum size across all cpus.
+template <size_t N>
+void ResizePerfBufferSpecs(std::array<bpf_tools::PerfBufferSpec, N>* perf_buffer_specs,
+                           const std::map<PerfBufferSizeCategory, size_t>& category_maximums) {
+  std::map<PerfBufferSizeCategory, size_t> category_sizes;
+  for (const auto& spec : *perf_buffer_specs) {
+    category_sizes[spec.size_category] += spec.size_bytes;
+  }
+
+  const int kNCPUs = get_nprocs_conf();
+  // Factor to multiply on both sides of division, to avoid float/double division.
+  const size_t kDivisorFactor = 100;
+  std::map<PerfBufferSizeCategory, size_t> category_divisor;
+  for (const auto& [category, size] : category_sizes) {
+    auto max_it = category_maximums.find(category);
+    DCHECK(max_it != category_maximums.end());
+
+    auto max_per_cpu = max_it->second / kNCPUs;
+
+    if (size < max_per_cpu) {
+      category_divisor[category] = kDivisorFactor;
+    } else {
+      category_divisor[category] = IntRoundUpDivide(size * kDivisorFactor, max_per_cpu);
+    }
+  }
+  // Clear category sizes so we can print out the total buffer sizes at the end.
+  category_sizes.clear();
+  for (auto& spec : *perf_buffer_specs) {
+    auto divisor_it = category_divisor.find(spec.size_category);
+    DCHECK(divisor_it != category_divisor.end());
+    spec.size_bytes = IntRoundUpDivide(spec.size_bytes * kDivisorFactor, divisor_it->second);
+    category_sizes[spec.size_category] += spec.size_bytes;
+  }
+  for (const auto& [category, size] : category_sizes) {
+    LOG(INFO) << absl::Substitute("Total perf buffer usage for $0 buffers across all cpus: $1",
+                                  magic_enum::enum_name(category), size * kNCPUs);
+  }
+}
+}  // namespace
+
 auto SocketTraceConnector::InitPerfBufferSpecs() {
   const size_t ncpus = get_nprocs_conf();
 
@@ -279,19 +327,32 @@ auto SocketTraceConnector::InitPerfBufferSpecs() {
       static_cast<int>(FLAGS_stirling_socket_tracer_target_control_bw_percpu * kSecondsPerPeriod *
                        cpu_scaling_factor);
 
-  return MakeArray<bpf_tools::PerfBufferSpec>({
+  const int kMaxTotalDataSize =
+      static_cast<int64_t>(FLAGS_stirling_socket_tracer_max_total_bw_overprovision_factor *
+                           FLAGS_stirling_socket_tracer_max_total_data_bw * kSecondsPerPeriod);
+  const int kMaxTotalControlSize =
+      static_cast<int64_t>(FLAGS_stirling_socket_tracer_max_total_bw_overprovision_factor *
+                           FLAGS_stirling_socket_tracer_max_total_control_bw * kSecondsPerPeriod);
+  std::map<PerfBufferSizeCategory, size_t> category_maximums(
+      {{PerfBufferSizeCategory::kData, kMaxTotalDataSize},
+       {PerfBufferSizeCategory::kControl, kMaxTotalControlSize}});
+
+  auto specs = MakeArray<bpf_tools::PerfBufferSpec>({
       // For data events. The order must be consistent with output tables.
-      {"socket_data_events", HandleDataEvent, HandleDataEventLoss, kTargetDataBufferSize},
+      {"socket_data_events", HandleDataEvent, HandleDataEventLoss, kTargetDataBufferSize,
+       PerfBufferSizeCategory::kData},
       // For non-data events. Must not mix with the above perf buffers for data events.
       {"socket_control_events", HandleControlEvent, HandleControlEventLoss,
-       kTargetControlBufferSize},
+       kTargetControlBufferSize, PerfBufferSizeCategory::kControl},
       {"conn_stats_events", HandleConnStatsEvent, HandleConnStatsEventLoss,
-       kTargetControlBufferSize},
-      {"mmap_events", HandleMMapEvent, HandleMMapEventLoss, kTargetControlBufferSize / 10},
-      {"go_grpc_header_events", HandleHTTP2HeaderEvent, HandleHTTP2HeaderEventLoss,
-       kTargetDataBufferSize / 10},
-      {"go_grpc_data_events", HandleHTTP2Data, HandleHTTP2DataLoss, kTargetDataBufferSize},
+       kTargetControlBufferSize, PerfBufferSizeCategory::kControl},
+      {"mmap_events", HandleMMapEvent, HandleMMapEventLoss, kTargetControlBufferSize / 10,
+       PerfBufferSizeCategory::kControl},
+      {"go_grpc_events", HandleHTTP2Event, HandleHTTP2EventLoss, kTargetDataBufferSize,
+       PerfBufferSizeCategory::kData},
   });
+  ResizePerfBufferSpecs(&specs, category_maximums);
+  return specs;
 }
 
 Status SocketTraceConnector::InitBPF() {
@@ -445,8 +506,7 @@ std::string BPFMapsInfo(bpf_tools::BCCWrapper* bcc) {
   out += BPFMapInfo<uint64_t, struct data_args_t>(bcc, "active_ssl_write_args_map");
   out += BPFMapInfo<uint32_t, struct go_tls_symaddrs_t>(bcc, "go_tls_symaddrs_map");
   out += BPFMapInfo<uint32_t, struct go_http2_symaddrs_t>(bcc, "http2_symaddrs_map");
-  out += BPFMapInfo<void*, struct go_grpc_http2_header_event_t::header_attr_t>(
-      bcc, "active_write_headers_frame_map");
+  out += BPFMapInfo<void*, struct go_grpc_event_attr_t>(bcc, "active_write_headers_frame_map");
   out += BPFMapInfo<uint64_t, struct conn_info_t>(bcc, "conn_info_map");
   out += BPFMapInfo<uint64_t, uint64_t>(bcc, "conn_disabled_map");
   out += BPFMapInfo<uint64_t, struct accept_args_t>(bcc, "active_accept_args_map");
@@ -531,7 +591,7 @@ void SocketTraceConnector::TransferDataImpl(ConnectorContext* ctx,
   }
 
   constexpr auto kDebugDumpPeriod = std::chrono::minutes(1);
-  if (sampling_freq_mgr_.count() % (kDebugDumpPeriod / kSamplingPeriod)) {
+  if (sampling_freq_mgr_.count() % (kDebugDumpPeriod / kSamplingPeriod) == 0) {
     if (debug_level_ >= 1) {
       LOG(INFO) << "Context: " << DumpContext(ctx);
       LOG(INFO) << "BPF map info: " << BPFMapsInfo(static_cast<BCCWrapper*>(this));
@@ -553,15 +613,27 @@ void SocketTraceConnector::TransferDataImpl(ConnectorContext* ctx,
 
   for (const auto& conn_tracker : conn_trackers_mgr_.active_trackers()) {
     const auto& transfer_spec = protocol_transfer_specs_[conn_tracker->protocol()];
-    DataTable* data_table = data_tables[transfer_spec.table_num];
+
+    DataTable* data_table = nullptr;
+    if (transfer_spec.enabled) {
+      data_table = data_tables[transfer_spec.table_num];
+    }
 
     UpdateTrackerTraceLevel(conn_tracker);
 
     conn_tracker->IterationPreTick(iteration_time_, cluster_cidrs, proc_parser_.get(),
                                    socket_info_mgr_.get());
-    if (transfer_spec.enabled && transfer_spec.transfer_fn && data_table != nullptr) {
+
+    if (transfer_spec.transfer_fn != nullptr) {
       transfer_spec.transfer_fn(*this, ctx, conn_tracker, data_table);
+    } else {
+      // If there's no transfer function, then the tracker should not be holding any data.
+      // http::ProtocolTraits is used as a placeholder; the frames deque is expected to be
+      // std::monotstate.
+      ECHECK(conn_tracker->send_data().Empty<protocols::http::Message>());
+      ECHECK(conn_tracker->recv_data().Empty<protocols::http::Message>());
     }
+
     conn_tracker->IterationPostTick();
   }
 
@@ -607,11 +679,12 @@ Status SocketTraceConnector::DisableSelfTracing() {
 // Perf Buffer Polling and Callback functions.
 //-----------------------------------------------------------------------------
 
-void SocketTraceConnector::HandleDataEvent(void* cb_cookie, void* data, int /*data_size*/) {
+void SocketTraceConnector::HandleDataEvent(void* cb_cookie, void* data, int data_size) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
   auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
   auto data_event_ptr = std::make_unique<SocketDataEvent>(data);
   connector->event_counter.Add({{"source_name", "socket_trace_connector"},{"protocol", std::to_string(data_event_ptr.get()->attr.protocol)},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
+  connector->stats_.Increment(StatKey::kPollSocketDataEventSize, data_size);
   connector->AcceptDataEvent(std::move(data_event_ptr));
 }
 
@@ -667,11 +740,12 @@ void SocketTraceConnector::HandleMMapEventLoss(void* cb_cookie, uint64_t lost) {
   static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossMMapEvent, lost);
 }
 
-void SocketTraceConnector::HandleHTTP2HeaderEvent(void* cb_cookie, void* data, int /*data_size*/) {
+void SocketTraceConnector::HandleHTTP2Event(void* cb_cookie, void* data, int /*data_size*/) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
 
   auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
 
+<<<<<<< HEAD
   auto event = std::make_unique<HTTP2HeaderEvent>(data);
 
   VLOG(3) << absl::Substitute(
@@ -706,13 +780,52 @@ void SocketTraceConnector::HandleHTTP2Data(void* cb_cookie, void* data, int /*da
       event->attr.stream_id, event->attr.end_stream, event->payload);
   connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
   connector->AcceptHTTP2Data(std::move(event));
+=======
+  // Note: Directly accessing data through the data pointer can result in mis-aligned accesses.
+  // This is because the perf buffer data starts at an offset of 4 bytes.
+  // Accessing the event_type should be safe as long as it is 4-byte data type.
+  auto event_type = reinterpret_cast<go_grpc_event_attr_t*>(data)->event_type;
+
+  switch (event_type) {
+    case kHeaderEventRead:
+    case kHeaderEventWrite: {
+      auto event = std::make_unique<HTTP2HeaderEvent>(data);
+
+      VLOG(3) << absl::Substitute(
+          "t=$0 pid=$1 type=$2 fd=$3 tsid=$4 stream_id=$5 end_stream=$6 name=$7 value=$8",
+          event->attr.timestamp_ns, event->attr.conn_id.upid.pid,
+          magic_enum::enum_name(event->attr.event_type), event->attr.conn_id.fd,
+          event->attr.conn_id.tsid, event->attr.stream_id, event->attr.end_stream, event->name,
+          event->value);
+      connector->AcceptHTTP2Header(std::move(event));
+    } break;
+    case kDataFrameEventRead:
+    case kDataFrameEventWrite: {
+      auto event = std::make_unique<HTTP2DataEvent>(data);
+
+      VLOG(3) << absl::Substitute(
+          "t=$0 pid=$1 type=$2 fd=$3 tsid=$4 stream_id=$5 end_stream=$6 data=$7",
+          event->attr.timestamp_ns, event->attr.conn_id.upid.pid,
+          magic_enum::enum_name(event->attr.event_type), event->attr.conn_id.fd,
+          event->attr.conn_id.tsid, event->attr.stream_id, event->attr.end_stream, event->payload);
+      connector->AcceptHTTP2Data(std::move(event));
+    } break;
+    default:
+      LOG(DFATAL) << absl::Substitute("Unexpected event_type $0",
+                                      magic_enum::enum_name(event_type));
+  }
+>>>>>>> upstream/main
 }
 
-void SocketTraceConnector::HandleHTTP2DataLoss(void* cb_cookie, uint64_t lost) {
+void SocketTraceConnector::HandleHTTP2EventLoss(void* cb_cookie, uint64_t lost) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
+<<<<<<< HEAD
   auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
   static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossHTTP2Data, lost);
   connector->event_counter.Add({{"source_name", "socket_trace_connector"},{"protocol", "http2"},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
+=======
+  static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossHTTP2Event, lost);
+>>>>>>> upstream/main
 }
 
 //-----------------------------------------------------------------------------
@@ -730,6 +843,10 @@ void SocketTraceConnector::AcceptDataEvent(std::unique_ptr<SocketDataEvent> even
   if (perf_buffer_events_output_stream_ != nullptr) {
     WriteDataEvent(*event);
   }
+
+  stats_.Increment(StatKey::kPollSocketDataEventCount);
+  stats_.Increment(StatKey::kPollSocketDataEventAttrSize, sizeof(event->attr));
+  stats_.Increment(StatKey::kPollSocketDataEventDataSize, event->msg.size());
 
   ConnTracker& tracker = GetOrCreateConnTracker(event->attr.conn_id);
   tracker.AddDataEvent(std::move(event));
@@ -824,7 +941,7 @@ template <>
 void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracker& conn_tracker,
                                          protocols::http2::Record record, DataTable* data_table) {
   using ::px::grpc::MethodInputOutput;
-  using ::px::stirling::grpc::ParsePB;
+  using ::px::stirling::grpc::ParseReqRespBody;
 
   protocols::http2::HalfStream* req_stream;
   protocols::http2::HalfStream* resp_stream;
@@ -850,22 +967,11 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   std::string path = req_stream->headers().ValueByKey(protocols::http2::headers::kPath);
 
   HTTPContentType content_type = HTTPContentType::kUnknown;
-
-  std::string req_data = req_stream->ConsumeData();
-  std::string resp_data = resp_stream->ConsumeData();
-  size_t req_data_size = req_stream->original_data_size();
-  size_t resp_data_size = resp_stream->original_data_size();
   if (record.HasGRPCContentType()) {
     content_type = HTTPContentType::kGRPC;
-    req_data = ParsePB(req_data, kMaxPBStringLen);
-    if (req_stream->data_truncated()) {
-      req_data.append(DataTable::kTruncatedMsg);
-    }
-    resp_data = ParsePB(resp_data, kMaxPBStringLen);
-    if (resp_stream->data_truncated()) {
-      resp_data.append(DataTable::kTruncatedMsg);
-    }
   }
+
+  ParseReqRespBody(&record, DataTable::kTruncatedMsg, kMaxPBStringLen);
 
   DataTable::RecordBuilder<&kHTTPTable> r(data_table, resp_stream->timestamp_ns);
   r.Append<r.ColIndex("time_")>(resp_stream->timestamp_ns);
@@ -885,13 +991,13 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   r.Append<r.ColIndex("resp_status")>(resp_status);
   // TODO(yzhao): Populate the following field from headers.
   r.Append<r.ColIndex("resp_message")>("OK");
-  r.Append<r.ColIndex("req_body_size")>(req_data_size);
+  r.Append<r.ColIndex("req_body_size")>(req_stream->original_data_size());
   // Do not apply truncation at this point, as the truncation was already done on serialized
   // protobuf message. This might result into longer text format data here, but the increase is
   // minimal.
-  r.Append<r.ColIndex("req_body")>(std::move(req_data));
-  r.Append<r.ColIndex("resp_body_size")>(resp_data_size);
-  r.Append<r.ColIndex("resp_body")>(std::move(resp_data));
+  r.Append<r.ColIndex("req_body")>(req_stream->ConsumeData());
+  r.Append<r.ColIndex("resp_body_size")>(resp_stream->original_data_size());
+  r.Append<r.ColIndex("resp_body")>(resp_stream->ConsumeData());
   int64_t latency_ns = CalculateLatency(req_stream->timestamp_ns, resp_stream->timestamp_ns);
   r.Append<r.ColIndex("latency")>(latency_ns);
   // TODO(yzhao): Remove once http2::Record::bpf_timestamp_ns is removed.
@@ -1174,7 +1280,7 @@ void SocketTraceConnector::TransferStream(ConnectorContext* ctx, ConnTracker* tr
   // This is a nop if the containers are already of the right type.
   tracker->InitFrames<TFrameType>();
 
-  if (tracker->state() == ConnTracker::State::kTransferring) {
+  if (data_table != nullptr && tracker->state() == ConnTracker::State::kTransferring) {
     // ProcessToRecords() parses raw events and produces messages in format that are expected by
     // table store. But those messages are not cached inside ConnTracker.
     auto records = tracker->ProcessToRecords<TProtocolTraits>();
@@ -1185,11 +1291,10 @@ void SocketTraceConnector::TransferStream(ConnectorContext* ctx, ConnTracker* tr
     }
   }
 
+  auto buffer_expiry_timestamp =
+      iteration_time() - std::chrono::seconds(FLAGS_datastream_buffer_expiry_duration_secs);
   auto message_expiry_timestamp =
-      iteration_time_ - std::chrono::seconds(FLAGS_messages_expiry_duration_secs);
-
-  auto buffer_expiry_timestamp = std::chrono::steady_clock::now() -
-                                 std::chrono::seconds(FLAGS_datastream_buffer_expiry_duration_secs);
+      iteration_time() - std::chrono::seconds(FLAGS_messages_expiry_duration_secs);
 
   tracker->Cleanup<TProtocolTraits>(FLAGS_messages_size_limit_bytes,
                                     FLAGS_datastream_buffer_retention_size,
@@ -1247,7 +1352,7 @@ void SocketTraceConnector::TransferConnStats(ConnectorContext* ctx, DataTable* d
     if (!active_upid && !activity) {
       const auto& sysconfig = system::Config::GetInstance();
       std::filesystem::path pid_file = sysconfig.proc_path() / std::to_string(key.upid.pid);
-      if (!fs::Exists(pid_file).ok()) {
+      if (!fs::Exists(pid_file)) {
         agg_stats.erase(iter++);
         continue;
       }

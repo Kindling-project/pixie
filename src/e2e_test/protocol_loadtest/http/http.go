@@ -19,21 +19,59 @@
 package http
 
 import (
+	"bytes"
 	"compress/gzip"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
+	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
-	"log"
-	"math/big"
 	"net/http"
-	"os"
-	"strings"
-	"time"
+
+	"px.dev/pixie/src/e2e_test/util"
 )
+
+const (
+	defaultNumHeaders = 8
+	defaultHeaderSize = 128
+	defaultBodySize   = 1024
+	defaultChunkSize  = 128
+)
+
+// LoadParams defines the post params accepted by the server.
+type LoadParams struct {
+	HeaderSize      int  `json:"header_size,omitempty"`
+	NumHeaders      int  `json:"num_headers,omitempty"`
+	BodySize        int  `json:"body_size,omitempty"`
+	ChunkSize       int  `json:"chunk_size,omitempty"`
+	DisableChunking bool `json:"disable_chunking,omitempty"`
+}
+
+func getDefaultParams() *LoadParams {
+	return &LoadParams{
+		NumHeaders:      defaultNumHeaders,
+		HeaderSize:      defaultHeaderSize,
+		BodySize:        defaultBodySize,
+		ChunkSize:       defaultChunkSize,
+		DisableChunking: false,
+	}
+}
+
+func checkExists(haystack []string, needle string) bool {
+	for _, it := range haystack {
+		if needle == it {
+			return true
+		}
+	}
+	return false
+}
+
+func duplicateReadCloser(r io.ReadCloser) (io.ReadCloser, io.ReadCloser, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	return io.NopCloser(bytes.NewReader(data)), io.NopCloser(bytes.NewReader(data)), nil
+}
 
 // Gzip handling adapted from https://gist.github.com/the42/1956518
 type gzipResponseWriter struct {
@@ -42,167 +80,138 @@ type gzipResponseWriter struct {
 }
 
 func (w gzipResponseWriter) Write(b []byte) (int, error) {
+	// gzipping changes Content-Length.
+	w.ResponseWriter.Header().Del("Content-Length")
 	return w.Writer.Write(b)
 }
 
-func optionallyGzipMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func gzipMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		if !checkExists(r.Header.Values("Accept-Encoding"), "gzip") {
 			next(w, r)
 			return
 		}
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Add("Content-Encoding", "gzip")
 		gz := gzip.NewWriter(w)
 		defer gz.Close()
-		gzr := gzipResponseWriter{Writer: gz, ResponseWriter: w}
-		next(gzr, r)
+		next(gzipResponseWriter{Writer: gz, ResponseWriter: w}, r)
 	}
 }
 
-type httpContent struct {
-	headers map[string]string
-	body    string
+type chunkWriter struct {
+	chunkSize int
+	http.ResponseWriter
 }
 
-func buildHTTPContent(numBytesHeaders int, numBytesBody int, char string) *httpContent {
-	headers := make(map[string]string)
-	// TODO(james): add random headers.
-	return &httpContent{
-		body:    strings.Repeat(char, numBytesBody),
-		headers: headers,
-	}
-}
-
-func makeSimpleServeFunc(numBytesHeaders int, numBytesBody int) http.HandlerFunc {
-	content := buildHTTPContent(numBytesHeaders, numBytesBody, "s")
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Force content to not be chunked.
-		bytesWritten, err := fmt.Fprint(w, content.body)
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", bytesWritten))
-		if err != nil {
-			log.Println("error")
+func (w chunkWriter) Write(b []byte) (int, error) {
+	// Setting Content-Length causes the inbuilt server to disable chunking.
+	w.ResponseWriter.Header().Del("Content-Length")
+	total := 0
+	for i := 0; i < len(b); i += w.chunkSize {
+		end := i + w.chunkSize
+		if end > len(b) {
+			end = len(b)
 		}
-	}
-}
-
-// Chunked+GZip not currently supported.
-func makeChunkedServeFunc(numBytesHeaders int, numBytesBody int, numChunks int) http.HandlerFunc {
-	content := buildHTTPContent(numBytesHeaders, numBytesBody, "c")
-	chunkedBody := make([]string, numChunks)
-	chunkSize := len(content.body) / numChunks
-	for i := 0; i < numChunks-1; i++ {
-		chunkedBody[i] = content.body[i*chunkSize : (i+1)*chunkSize]
-	}
-	chunkedBody[numChunks-1] = content.body[(numChunks-1)*chunkSize:]
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
+		c, err := w.ResponseWriter.Write(b[i:end])
+		total += c
+		if err != nil {
+			return total, err
+		}
+		flusher, ok := w.ResponseWriter.(http.Flusher)
 		if !ok {
-			panic("http.ResponseWriter should be an http.Flusher")
+			return total, fmt.Errorf("response writer is not a flusher")
 		}
-		for _, chunk := range chunkedBody {
-			_, err := fmt.Fprint(w, chunk)
-			if err != nil {
-				log.Println("error")
-			}
-			flusher.Flush()
+		flusher.Flush()
+	}
+	return total, nil
+}
+
+func chunkMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Body == nil {
+			http.Error(w, "missing form body", http.StatusBadRequest)
+			return
 		}
-	}
-}
-
-const (
-	bitsize  = 4096
-	certFile = "server.crt"
-	keyFile  = "server.key"
-)
-
-var x509Name = pkix.Name{
-	Organization: []string{"Pixie Labs Inc."},
-	Country:      []string{"US"},
-	Province:     []string{"California"},
-	Locality:     []string{"San Francisco"},
-}
-
-func generateCertFiles(dnsNames []string) (string, string, error) {
-	ca := &x509.Certificate{
-		SerialNumber:          big.NewInt(1653),
-		Subject:               x509Name,
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(10, 0, 0),
-		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
-	}
-	caKey, err := rsa.GenerateKey(rand.Reader, bitsize)
-	if err != nil {
-		return "", "", err
-	}
-	cert := &x509.Certificate{
-		SerialNumber:          big.NewInt(1658),
-		Subject:               x509Name,
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(10, 0, 0),
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		BasicConstraintsValid: true,
-		DNSNames:              dnsNames,
-	}
-	privateKey, err := rsa.GenerateKey(rand.Reader, bitsize)
-	if err != nil {
-		return "", "", err
-	}
-	certBytes, err := x509.CreateCertificate(rand.Reader, cert, ca, &privateKey.PublicKey, caKey)
-
-	if err != nil {
-		return "", "", err
-	}
-
-	certData := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
-	if err != nil {
-		return "", "", err
-	}
-	if err = os.WriteFile(certFile, certData, 0666); err != nil {
-		return "", "", err
-	}
-
-	keyData := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
-	if err != nil {
-		return "", "", err
-	}
-	if err = os.WriteFile(keyFile, keyData, 0666); err != nil {
-		return "", "", err
-	}
-
-	return certFile, keyFile, nil
-}
-
-func setupHTTPServer(ssl bool, port string, numBytesHeaders, numBytesBody int) {
-	if ssl {
-		certFile, keyFile, err := generateCertFiles([]string{"localhost"})
+		b1, b2, err := duplicateReadCloser(r.Body)
 		if err != nil {
-			panic(fmt.Sprintf("Could not create cert files: %s", err.Error()))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		if err := http.ListenAndServeTLS(fmt.Sprintf(":%s", port), certFile, keyFile, nil); err != nil {
-			panic(fmt.Sprintf("HTTP TLS server failed: %s", err.Error()))
+		r.Body = b1
+		params := getDefaultParams()
+		err = json.NewDecoder(b2).Decode(params)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-	} else {
-		if err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil); err != nil {
-			panic(fmt.Sprintf("HTTP server failed: %s", err.Error()))
+		if params.DisableChunking {
+			next(w, r)
+			return
 		}
+		w.Header().Add("Transfer-Encoding", "chunked")
+		next(chunkWriter{chunkSize: params.ChunkSize, ResponseWriter: w}, r)
+	}
+}
+
+func basicHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "expected post request", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "only supports json post data", http.StatusUnsupportedMediaType)
+		return
+	}
+	b1, b2, err := duplicateReadCloser(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	r.Body = b1
+	params := getDefaultParams()
+	err = json.NewDecoder(b2).Decode(params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("X-Px-Ack-Seq-Id", r.Header.Get("X-Px-Seq-Id"))
+	for i := 0; i < params.NumHeaders; i++ {
+		w.Header().Add(
+			fmt.Sprintf("X-Custom-Header-%d", i), string(util.RandPrintable(params.HeaderSize)),
+		)
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Add("Content-Length", fmt.Sprintf("%d", params.BodySize))
+
+	_, _ = w.Write(util.RandPrintable(params.BodySize))
+}
+
+func setupHTTPSServer(tlsConfig *tls.Config, port string) {
+	ln, err := tls.Listen("tcp", fmt.Sprintf(":%s", port), tlsConfig)
+	if err != nil {
+		panic(fmt.Sprintf("HTTP TLS listen failed: %v", err))
+	}
+	fmt.Println("Serving HTTPS")
+	if err = http.Serve(ln, nil); err != nil {
+		panic(fmt.Sprintf("HTTP TLS serve failed: %v", err))
+	}
+}
+
+func setupHTTPServer(port string) {
+	fmt.Println("Serving HTTP")
+	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil); err != nil {
+		panic(fmt.Sprintf("HTTP server failed: %v", err))
 	}
 }
 
 // RunHTTPServers sets up and runs the SSL and non-SSL HTTP server with the provided parameters.
-// TODO(nserrino):  PP-3238  Remove numBytesHeaders/numBytesBody and make it a parameter passed
-// in by the HTTP request so that we don't have to redeploy.
-func RunHTTPServers(port, sslPort string, numBytesHeaders, numBytesBody int) {
-	http.HandleFunc("/", optionallyGzipMiddleware(makeSimpleServeFunc(numBytesHeaders, numBytesBody)))
-	http.HandleFunc("/chunked", makeChunkedServeFunc(numBytesHeaders, numBytesBody, 10))
+func RunHTTPServers(tlsConfig *tls.Config, port, sslPort string) {
+	http.HandleFunc("/", chunkMiddleware(gzipMiddleware(basicHandler)))
 	// SSL port is optional
-	if sslPort != "" {
-		go setupHTTPServer(true, sslPort, numBytesHeaders, numBytesBody)
+	if sslPort != "" && tlsConfig != nil {
+		go setupHTTPSServer(tlsConfig, sslPort)
 	}
-	setupHTTPServer(false, port, numBytesHeaders, numBytesBody)
+	setupHTTPServer(port)
 }

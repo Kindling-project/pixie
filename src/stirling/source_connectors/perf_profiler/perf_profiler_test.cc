@@ -26,9 +26,11 @@
 #include "src/common/base/base.h"
 #include "src/common/exec/subprocess.h"
 #include "src/common/fs/fs_wrapper.h"
+#include "src/stirling/source_connectors/perf_profiler/java/attach.h"
 #include "src/stirling/source_connectors/perf_profiler/perf_profile_connector.h"
 #include "src/stirling/source_connectors/perf_profiler/stack_traces_table.h"
 #include "src/stirling/testing/common.h"
+#include "src/stirling/utils/proc_path_tools.h"
 
 DEFINE_uint32(test_run_time, 90, "Number of seconds to run the test.");
 DECLARE_bool(stirling_profiler_java_symbols);
@@ -47,17 +49,31 @@ class CPUPinnedBinaryRunner {
   void Run(const std::string& binary_path, const uint64_t cpu_idx) {
     // Run the sub-process & pin it to a CPU.
     const std::string kTasksetBinPath = "/usr/bin/taskset";
-    ASSERT_OK(fs::Exists(binary_path));
-    ASSERT_OK(fs::Exists(kTasksetBinPath));
+    ASSERT_TRUE(fs::Exists(binary_path));
+    ASSERT_TRUE(fs::Exists(kTasksetBinPath));
     ASSERT_OK(sub_process_.Start({kTasksetBinPath, "-c", std::to_string(cpu_idx), binary_path}));
   }
-
   ~CPUPinnedBinaryRunner() { sub_process_.Kill(); }
   int pid() const { return sub_process_.child_pid(); }
+  void Kill() { sub_process_.Kill(); }
 
  private:
   SubProcess sub_process_;
 };
+
+absl::flat_hash_set<md::UPID> ToUPIDs(const std::vector<CPUPinnedBinaryRunner>& processes) {
+  absl::flat_hash_set<md::UPID> upids;
+  system::ProcParser proc_parser(system::Config::GetInstance());
+  for (const auto& p : processes) {
+    StatusOr<uint64_t> ts = proc_parser.GetPIDStartTimeTicks(p.pid());
+    if (!ts.ok()) {
+      LOG(ERROR) << absl::Substitute("Could not find start_time of PID=$0", p.pid());
+      continue;
+    }
+    upids.emplace(0, p.pid(), ts.ValueOr(-1));
+  }
+  return upids;
+}
 
 class PerfProfileBPFTest : public ::testing::Test {
  public:
@@ -203,16 +219,32 @@ class PerfProfileBPFTest : public ::testing::Test {
   }
 
   template <typename T>
-  std::vector<size_t> GetTargetRowIdxs(const std::vector<T>& sub_processes) {
-    auto GetSubProcessPids = [&]() {
-      std::vector<int> pids;
-      for (const auto& sub_process : sub_processes) {
-        pids.push_back(sub_process.pid());
-      }
-      return pids;
-    };
+  std::vector<int> GetSubProcessPids(const std::vector<T>& sub_processes) {
+    std::vector<int> pids;
+    for (const auto& sub_process : sub_processes) {
+      pids.push_back(sub_process.pid());
+    }
+    return pids;
+  }
 
-    const std::vector<int> pids = GetSubProcessPids();
+  template <typename T>
+  std::vector<struct upid_t> GetSubProcessUPIDs(const std::vector<T>& sub_processes) {
+    const std::vector<int> pids_vec = GetSubProcessPids(sub_processes);
+    const std::set<int> pids(pids_vec.begin(), pids_vec.end());
+    const auto& md_upids = ctx_->GetUPIDs();
+    std::vector<struct upid_t> upids;
+
+    for (const auto upid : md_upids) {
+      if (pids.find(upid.pid()) != pids.end()) {
+        upids.push_back({{upid.pid()}, static_cast<uint64_t>(upid.start_ts())});
+      }
+    }
+    return upids;
+  }
+
+  template <typename T>
+  std::vector<size_t> GetTargetRowIdxs(const std::vector<T>& sub_processes) {
+    const std::vector<int> pids = GetSubProcessPids(sub_processes);
     return FindRecordIdxMatchesPIDs(columns_, kStackTraceUPIDIdx, pids);
   }
 
@@ -252,7 +284,7 @@ class PerfProfileBPFTest : public ::testing::Test {
 
   const std::chrono::seconds test_run_time_;
   std::unique_ptr<PerfProfileConnector> source_;
-  std::unique_ptr<StandaloneContext> ctx_;
+  std::unique_ptr<TestContext> ctx_;
   DataTable data_table_;
   const std::vector<DataTable*> data_tables_{&data_table_};
 
@@ -285,7 +317,7 @@ TEST_F(PerfProfileBPFTest, PerfProfilerGoTest) {
 
   // We wait until here to create the connector context, i.e. so that perf_profile_connector
   // finds the upids that belong to the sub-processes that we have just created.
-  ctx_ = std::make_unique<StandaloneContext>();
+  ctx_ = std::make_unique<TestContext>(ToUPIDs(sub_processes));
 
   const std::chrono::duration<double> elapsed_time = RunTest();
 
@@ -318,7 +350,7 @@ TEST_F(PerfProfileBPFTest, PerfProfilerCppTest) {
 
   // We wait until here to create the connector context, i.e. so that perf_profile_connector
   // finds the upids that belong to the sub-processes that we have just created.
-  ctx_ = std::make_unique<StandaloneContext>();
+  ctx_ = std::make_unique<TestContext>(ToUPIDs(sub_processes));
 
   const std::chrono::duration<double> elapsed_time = RunTest();
 
@@ -340,7 +372,7 @@ TEST_F(PerfProfileBPFTest, PerfProfilerCppTest) {
 TEST_F(PerfProfileBPFTest, PerfProfilerJavaTest) {
   const std::filesystem::path bazel_app_path = BazelJavaTestAppPath("fib");
   LOG(INFO) << "bazel_app_path: " << bazel_app_path;
-  ASSERT_OK(fs::Exists(bazel_app_path));
+  ASSERT_TRUE(fs::Exists(bazel_app_path));
 
   // Start they toy apps as sub-processes, then,
   // for a certain amount of time, collect data using RunTest().
@@ -348,7 +380,7 @@ TEST_F(PerfProfileBPFTest, PerfProfilerJavaTest) {
 
   // We wait until here to create the connector context, i.e. so that perf_profile_connector
   // finds the upids that belong to the sub-processes that we have just created.
-  ctx_ = std::make_unique<StandaloneContext>();
+  ctx_ = std::make_unique<TestContext>(ToUPIDs(sub_processes));
 
   RunTest();
 
@@ -395,19 +427,49 @@ TEST_F(PerfProfileBPFTest, PerfProfilerJavaTest) {
   // The test itself. We expect, if everything is working, to see twice as much fib52() as fib27().
   EXPECT_GT(ratio, 2.0 - kRatioMargin);
   EXPECT_LT(ratio, 2.0 + kRatioMargin);
+
+  // Now we will test agent cleanup, specifically whether the aritfacts directory is removed.
+  // We will construt a list of artifacts paths that we expect,
+  // then kill all the subprocesses,
+  // and expect that all the artifacts paths are (as a result) removed.
+  std::vector<std::filesystem::path> artifacts_paths;
+
+  // Get the UPIDs of our subprocs.
+  const auto upids = GetSubProcessUPIDs(sub_processes);
+
+  // Consruct the names of the artifacts paths and expect that they exist.
+  for (const auto& upid : upids) {
+    const auto artifacts_path = java::StirlingArtifactsPath(upid);
+    EXPECT_TRUE(fs::Exists(artifacts_path));
+    if (fs::Exists(artifacts_path)) {
+      artifacts_paths.push_back(artifacts_path);
+    }
+  }
+  EXPECT_EQ(artifacts_paths.size(), kNumSubProcesses);
+
+  // Kill the subprocs.
+  for (auto& proc : sub_processes) {
+    proc.Kill();
+  }
+
+  // Run transfer data so that cleanup is kicked off in the perf profile source connector.
+  source_->TransferData(ctx_.get(), data_tables_);
+
+  // Expect that that the artifacts paths have been removed.
+  for (const auto& artifacts_path : artifacts_paths) {
+    EXPECT_FALSE(fs::Exists(artifacts_path)) << artifacts_path;
+  }
 }
 
 TEST_F(PerfProfileBPFTest, TestOutOfContext) {
   const std::filesystem::path bazel_app_path = BazelCCTestAppPath("profiler_test_app_fib");
 
-  // For this test case, we create the connector context *before*
-  // starting sub-processes. For this reason, the perf_profile_connector
-  // will consider the sub-processes as "out-of-context" and not symbolize them.
-  ctx_ = std::make_unique<StandaloneContext>();
-
   // Start they toy apps as sub-processes, then,
   // for a certain amount of time, collect data using RunTest().
   auto sub_processes = StartSubProcesses<CPUPinnedBinaryRunner>(bazel_app_path);
+
+  // For this test case, we pass in an empty list of PIDs to trace.
+  ctx_ = std::make_unique<TestContext>(absl::flat_hash_set<md::UPID>());
 
   RunTest();
 

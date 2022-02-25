@@ -103,7 +103,16 @@ class ConnTracker : NotCopyMoveable {
     kInvalidRecords,
   };
 
-  // State values change monotonically from lower to higher values; and cannot change reversely.
+  // State values change monotonically from lower to higher values.
+  //
+  //                           |                 State
+  //                           | Collecting | Transferring | Disabled
+  // --------------------------|------------|--------------|-------------
+  // Accepts data events       | Yes        | Yes          | No (dropped)
+  // Accepts metadata events   | Yes        | Yes          | Yes
+  // Accepts conn stats events | Yes        | Yes          | Yes
+  // Pushes data records       | No         | Yes          | No
+  // Pushes conn stats records | Yes        | Yes          | Yes
   enum class State {
     // When collecting, the tracker collects data from BPF, but does not push them to table store.
     kCollecting,
@@ -328,6 +337,8 @@ class ConnTracker : NotCopyMoveable {
    * @return Data stream of send data.
    */
   const DataStream& send_data() const { return send_data_; }
+  // Mutable version of the above, for testing purposes.
+  DataStream& send_data() { return send_data_; }
 
   /**
    * Get the DataStream of received frames for this connection.
@@ -335,6 +346,8 @@ class ConnTracker : NotCopyMoveable {
    * @return Data stream of received data.
    */
   const DataStream& recv_data() const { return recv_data_; }
+  // Mutable version of the above, for testing purposes.
+  DataStream& recv_data() { return recv_data_; }
 
   /**
    * Get the DataStream of requests for this connection.
@@ -351,13 +364,13 @@ class ConnTracker : NotCopyMoveable {
   DataStream* resp_data();
 
   /**
-   * @return Returns the latest timestamp of all BPF events received by this tracker (using BPF
+   * Returns the latest timestamp of all BPF events received by this tracker (using BPF
    * timestamp).
    */
   uint64_t last_bpf_timestamp_ns() { return last_bpf_timestamp_ns_; }
 
   /**
-   * @return Returns the a timestamp the last time an event was added to this tracker (using
+   * Returns the a timestamp the last time an event was added to this tracker (using
    * steady_clock).
    */
   std::chrono::time_point<std::chrono::steady_clock> last_update_timestamp() {
@@ -425,6 +438,11 @@ class ConnTracker : NotCopyMoveable {
   void set_current_time(std::chrono::time_point<std::chrono::steady_clock> time) {
     DCHECK(time >= current_time_);
     current_time_ = time;
+
+    // If there's no previous activity, set to current time.
+    if (last_activity_timestamp_.time_since_epoch().count() == 0) {
+      last_activity_timestamp_ = current_time_;
+    }
   }
 
   /**
@@ -517,8 +535,6 @@ class ConnTracker : NotCopyMoveable {
     using TFrameType = typename TProtocolTraits::frame_type;
     using TStateType = typename TProtocolTraits::state_type;
 
-    InitFrames<TFrameType>();
-
     if constexpr (std::is_same_v<TFrameType, protocols::http2::Stream>) {
       http2_client_streams_.Cleanup(frame_size_limit_bytes, frame_expiry_timestamp);
       http2_server_streams_.Cleanup(frame_size_limit_bytes, frame_expiry_timestamp);
@@ -569,6 +585,27 @@ class ConnTracker : NotCopyMoveable {
       send_data_.InitFrames<TFrameType>();
       recv_data_.InitFrames<TFrameType>();
     }
+  }
+
+  template <typename TProtocolTraits>
+  size_t MemUsage() const {
+    using TFrameType = typename TProtocolTraits::frame_type;
+
+    size_t data_buffer_total = 0;
+    data_buffer_total += send_data().data_buffer().capacity();
+    data_buffer_total += recv_data().data_buffer().capacity();
+
+    size_t parsed_msg_total = 0;
+    size_t http2_events_total = 0;
+    if constexpr (std::is_same_v<TFrameType, protocols::http2::Stream>) {
+      http2_events_total += http2_client_streams_.StreamsSize();
+      http2_events_total += http2_server_streams_.StreamsSize();
+    } else {
+      parsed_msg_total += send_data().FramesSize<TFrameType>();
+      parsed_msg_total += recv_data().FramesSize<TFrameType>();
+    }
+
+    return data_buffer_total + http2_events_total + parsed_msg_total;
   }
 
  private:

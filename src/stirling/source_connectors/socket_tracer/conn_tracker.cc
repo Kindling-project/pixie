@@ -117,6 +117,23 @@ void ConnTracker::AddConnCloseEvent(const close_event_t& close_event, uint64_t t
   close_info_.send_bytes = close_event.wr_bytes;
   close_info_.recv_bytes = close_event.rd_bytes;
 
+  // Update the state to indicate ConnClose for HTTP parser.
+  // When an HTTP response has no Content-Length or Transfer-Encoding, the message is
+  // terminated by ConnClose. See Case 3C of ParseBody() in `http/parse.cc`.
+  // TODO(chengruizhe): Add a base class for state in every protocol and move conn_closed to the
+  // base class.
+  if (protocol() == traffic_protocol_t::kProtocolHTTP) {
+    auto state_ptr = protocol_state<protocols::http::StateWrapper>();
+    if (state_ptr == nullptr) {
+      InitProtocolState<protocols::http::StateWrapper>();
+      state_ptr = protocol_state<protocols::http::StateWrapper>();
+    }
+    state_ptr->global.conn_closed = true;
+  }
+
+  send_data_.set_conn_closed();
+  recv_data_.set_conn_closed();
+
   CONN_TRACE(1) << absl::Substitute("conn_close");
 
   MarkForDeath();
@@ -239,11 +256,11 @@ void ConnTracker::AddHTTP2Header(std::unique_ptr<HTTP2HeaderEvent> hdr) {
   UpdateTimestamps(hdr->attr.timestamp_ns);
 
   bool write_event = false;
-  switch (hdr->attr.type) {
-    case HeaderEventType::kHeaderEventWrite:
+  switch (hdr->attr.event_type) {
+    case grpc_event_type_t::kHeaderEventWrite:
       write_event = true;
       break;
-    case HeaderEventType::kHeaderEventRead:
+    case grpc_event_type_t::kHeaderEventRead:
       write_event = false;
       break;
     default:
@@ -316,11 +333,11 @@ void ConnTracker::AddHTTP2Data(std::unique_ptr<HTTP2DataEvent> data) {
   UpdateTimestamps(data->attr.timestamp_ns);
 
   bool write_event = false;
-  switch (data->attr.type) {
-    case DataFrameEventType::kDataFrameEventWrite:
+  switch (data->attr.event_type) {
+    case grpc_event_type_t::kDataFrameEventWrite:
       write_event = true;
       break;
-    case DataFrameEventType::kDataFrameEventRead:
+    case grpc_event_type_t::kDataFrameEventRead:
       write_event = false;
       break;
     default:
@@ -784,8 +801,7 @@ void ConnTracker::CheckProcForConnClose() {
   std::filesystem::path fd_file = sysconfig.proc_path() / std::to_string(conn_id().upid.pid) /
                                   "fd" / std::to_string(conn_id().fd);
 
-  if (!fs::Exists(fd_file).ok()) {
-    CONN_TRACE(1) << "Socket file descriptor of the connection is closed. Marking for death";
+  if (!fs::Exists(fd_file)) {
     MarkForDeath(0);
   }
 }

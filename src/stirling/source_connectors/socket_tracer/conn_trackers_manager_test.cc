@@ -109,11 +109,10 @@ TEST_F(ConnTrackersManagerTest, DebugInfo) {
   std::string debug_info = trackers_mgr_.DebugInfo();
   EXPECT_THAT(debug_info, HasSubstr("ConnTracker count statistics: kTotal=1 kReadyForDestruction=0 "
                                     "kCreated=1 kDestroyed=0 kDestroyedGens=0"));
-  EXPECT_THAT(
-      debug_info,
-      HasSubstr("conn_tracker=conn_id=[pid=1 start_time_ticks=1 fd=1 gen=1] state=kCollecting "
-                "remote_addr=-:-1 role=kRoleUnknown protocol=kProtocolUnknown zombie=false "
-                "ready_for_destruction=false\n"));
+  EXPECT_THAT(debug_info,
+              HasSubstr("conn_tracker=conn_id=[upid=1:1 fd=1 gen=1] state=kCollecting "
+                        "remote_addr=-:-1 role=kRoleUnknown protocol=kProtocolUnknown zombie=false "
+                        "ready_for_destruction=false\n"));
 }
 
 class ConnTrackerGenerationsTest : public ::testing::Test {
@@ -123,13 +122,13 @@ class ConnTrackerGenerationsTest : public ::testing::Test {
   }
 
   std::pair<ConnTracker*, bool> GetOrCreateTracker(uint64_t tsid) {
-    auto [tracker, created] = tracker_gens_.GetOrCreate(tsid, &tracker_pool);
-    if (created) {
-      struct conn_id_t conn_id = {};
-      conn_id.tsid = tsid;
-      tracker->SetConnID(conn_id);
-    }
-    return {tracker, created};
+    struct conn_id_t conn_id = {};
+    conn_id.upid.pid = 1;
+    conn_id.upid.start_time_ticks = 1;
+    conn_id.fd = 1;
+    conn_id.tsid = tsid;
+
+    return tracker_gens_.GetOrCreate(conn_id, &tracker_pool);
   }
 
   int CleanupTrackers() {

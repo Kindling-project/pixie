@@ -17,9 +17,13 @@
  */
 
 #include "src/stirling/source_connectors/perf_profiler/stringifier.h"
+
 #include <stdint.h>
 
+#include <utility>
 #include <vector>
+
+#include <absl/functional/bind_front.h>
 
 namespace px {
 namespace stirling {
@@ -31,6 +35,9 @@ Stringifier::Stringifier(Symbolizer* u_symbolizer, Symbolizer* k_symbolizer,
 std::string Stringifier::BuildStackTraceString(const std::vector<uintptr_t>& addrs,
                                                profiler::SymbolizerFn symbolize_fn,
                                                const std::string_view& suffix) {
+  using stringifier::kJavaInterpreter;
+  using stringifier::kSeparator;
+
   // TODO(jps): re-evaluate the correct amount to reserve here.
   std::string stack_trace_str;
   stack_trace_str.reserve(128);
@@ -39,6 +46,7 @@ std::string Stringifier::BuildStackTraceString(const std::vector<uintptr_t>& add
   // otherwise expect to find "main" or "start_thread". Given that this address
   // is not a "real" address, we filter it out below.
   constexpr uint64_t kSentinelAddr = 0xcccccccccccccccc;
+  uint64_t num_collapsed = 0;
 
   // Build the folded stack trace string.
   for (auto iter = addrs.rbegin(); iter != addrs.rend(); ++iter) {
@@ -48,9 +56,20 @@ std::string Stringifier::BuildStackTraceString(const std::vector<uintptr_t>& add
       // Sentinel values can occur in other spots (though it's rare); leave those ones in.
       continue;
     }
-    stack_trace_str += symbolize_fn(addr);
-    stack_trace_str += suffix;
-    stack_trace_str += stringifier::kSeparator;
+    const std::string_view symbol = symbolize_fn(addr);
+    if (symbol == kJavaInterpreter) {
+      ++num_collapsed;
+      continue;
+    } else if (num_collapsed > 0) {
+      stack_trace_str = absl::StrCat(stack_trace_str, kJavaInterpreter, " [", num_collapsed, "x]",
+                                     suffix, kSeparator);
+      num_collapsed = 0;
+    }
+    stack_trace_str = absl::StrCat(stack_trace_str, symbol, suffix, kSeparator);
+  }
+  if (num_collapsed) {
+    stack_trace_str = absl::StrCat(stack_trace_str, kJavaInterpreter, " [", num_collapsed, "x]",
+                                   suffix, kSeparator);
   }
 
   if (!stack_trace_str.empty()) {
@@ -98,8 +117,8 @@ std::string Stringifier::FoldedStackTraceString(const stack_trace_key_t& key) {
   // Also, it is easier to read, e.g.:
   // stack_trace_str = u_stack_str_fn() + ";" + k_stack_str_fn();
   auto fn_addr = &Stringifier::FindOrBuildStackTraceString;
-  auto u_stack_str_fn = std::bind(fn_addr, this, u_stack_id, u_symbolizer_fn, kUserSuffix);
-  auto k_stack_str_fn = std::bind(fn_addr, this, k_stack_id, k_symbolizer_fn, kKernSuffix);
+  auto u_stack_str_fn = absl::bind_front(fn_addr, this, u_stack_id, u_symbolizer_fn, kUserSuffix);
+  auto k_stack_str_fn = absl::bind_front(fn_addr, this, k_stack_id, k_symbolizer_fn, kKernSuffix);
 
   std::string stack_trace_str;
   stack_trace_str.reserve(128);

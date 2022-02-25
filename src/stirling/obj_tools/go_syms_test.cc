@@ -29,13 +29,14 @@ namespace obj_tools {
 using ::testing::Field;
 using ::testing::StrEq;
 
-constexpr std::string_view kTestGoBinaryPath = "src/stirling/obj_tools/testdata/go/test_go_binary";
+constexpr std::string_view kTestGoBinaryPath =
+    "src/stirling/obj_tools/testdata/go/test_go_1_16_binary";
 
 TEST(ReadBuildVersionTest, WorkingOnBasicGoBinary) {
   const std::string kPath = px::testing::BazelBinTestFilePath(kTestGoBinaryPath);
   ASSERT_OK_AND_ASSIGN(std::unique_ptr<ElfReader> elf_reader, ElfReader::Create(kPath));
   ASSERT_OK_AND_ASSIGN(std::string version, ReadBuildVersion(elf_reader.get()));
-  EXPECT_THAT(version, StrEq("go1.16.12"));
+  EXPECT_THAT(version, StrEq("go1.16.14"));
 }
 
 TEST(IsGoExecutableTest, WorkingOnBasicGoBinary) {

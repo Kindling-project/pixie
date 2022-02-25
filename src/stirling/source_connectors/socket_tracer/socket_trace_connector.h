@@ -145,10 +145,8 @@ class SocketTraceConnector : public SourceConnector, public bpf_tools::BCCWrappe
   static void HandleConnStatsEventLoss(void* cb_cookie, uint64_t lost);
   static void HandleMMapEvent(void* cb_cookie, void* data, int data_size);
   static void HandleMMapEventLoss(void* cb_cookie, uint64_t lost);
-  static void HandleHTTP2HeaderEvent(void* cb_cookie, void* data, int data_size);
-  static void HandleHTTP2HeaderEventLoss(void* cb_cookie, uint64_t lost);
-  static void HandleHTTP2Data(void* cb_cookie, void* data, int data_size);
-  static void HandleHTTP2DataLoss(void* cb_cookie, uint64_t lost);
+  static void HandleHTTP2Event(void* cb_cookie, void* data, int data_size);
+  static void HandleHTTP2EventLoss(void* cb_cookie, uint64_t lost);
 
   // Most HTTP servers support 8K headers, so we truncate after that.
   // https://stackoverflow.com/questions/686217/maximum-on-http-header-values
@@ -172,12 +170,9 @@ class SocketTraceConnector : public SourceConnector, public bpf_tools::BCCWrappe
   void AcceptHTTP2Header(std::unique_ptr<HTTP2HeaderEvent> event);
   void AcceptHTTP2Data(std::unique_ptr<HTTP2DataEvent> event);
 
-  // Transfer of messages to the data table.
-  void TransferStreams(ConnectorContext* ctx, uint32_t table_num, DataTable* data_table);
-  void TransferConnStats(ConnectorContext* ctx, DataTable* data_table);
-
   template <typename TProtocolTraits>
   void TransferStream(ConnectorContext* ctx, ConnTracker* tracker, DataTable* data_table);
+  void TransferConnStats(ConnectorContext* ctx, DataTable* data_table);
 
   void set_iteration_time(std::chrono::time_point<std::chrono::steady_clock> time) {
     DCHECK(time >= iteration_time_);
@@ -252,13 +247,18 @@ class SocketTraceConnector : public SourceConnector, public bpf_tools::BCCWrappe
     kLossSocketControlEvent,
     kLossConnStatsEvent,
     kLossMMapEvent,
-    kLossGoGRPCHeaderEvent,
-    kLossHTTP2Data,
+    kLossHTTP2Event,
+
+    kPollSocketDataEventCount,
+    kPollSocketDataEventAttrSize,
+    kPollSocketDataEventDataSize,
+    kPollSocketDataEventSize,
   };
 
   utils::StatCounter<StatKey> stats_;
 
   friend class SocketTraceConnectorFriend;
+  friend class SocketTraceBPFTest;
 };
 
 }  // namespace stirling

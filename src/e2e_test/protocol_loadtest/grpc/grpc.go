@@ -20,14 +20,19 @@ package grpc
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
-	"strings"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
-	loadtestpb "px.dev/pixie/src/e2e_test/protocol_loadtest/grpc/loadtestpb"
+	// Enables gzip encoding for GRPC.
+	_ "google.golang.org/grpc/encoding/gzip"
+
+	"px.dev/pixie/src/e2e_test/protocol_loadtest/grpc/loadtestpb"
+	"px.dev/pixie/src/e2e_test/util"
 )
 
 type loadTestServer struct {
@@ -37,7 +42,7 @@ type loadTestServer struct {
 func (lt *loadTestServer) Unary(ctx context.Context, req *loadtestpb.UnaryRequest) (*loadtestpb.UnaryReply, error) {
 	return &loadtestpb.UnaryReply{
 		SeqId:   req.SeqId,
-		Payload: strings.Repeat("u", int(req.BytesRequested)),
+		Payload: string(util.RandPrintable(int(req.BytesRequested))),
 	}, nil
 }
 
@@ -59,7 +64,7 @@ func (lt *loadTestServer) ClientStreaming(s loadtestpb.LoadTester_ClientStreamin
 			if err != nil && err == io.EOF {
 				return s.SendAndClose(&loadtestpb.ClientStreamingReply{
 					SeqId:   seq,
-					Payload: strings.Repeat("c", bytesRequested),
+					Payload: string(util.RandPrintable(bytesRequested)),
 				})
 			}
 			if err != nil {
@@ -71,12 +76,11 @@ func (lt *loadTestServer) ClientStreaming(s loadtestpb.LoadTester_ClientStreamin
 
 // Implements the ServerStreaming loadtest endpoint.
 func (lt *loadTestServer) ServerStreaming(req *loadtestpb.ServerStreamingRequest, s loadtestpb.LoadTester_ServerStreamingServer) error {
-	payload := strings.Repeat("s", int(req.BytesRequestedPerMessage))
 	for i := int32(0); i < req.MessagesRequested; i++ {
 		resp := &loadtestpb.ServerStreamingReply{
 			SeqId:       req.SeqId,
 			StreamSeqId: int64(i),
-			Payload:     payload,
+			Payload:     string(util.RandPrintable(int(req.BytesRequestedPerMessage))),
 		}
 		if err := s.Send(resp); err != nil {
 			return err
@@ -99,7 +103,7 @@ func (lt *loadTestServer) BidirectionalStreaming(s loadtestpb.LoadTester_Bidirec
 		resp := &loadtestpb.BidirectionalStreamingReply{
 			SeqId:             in.SeqId,
 			StreamSeqIdServer: msgsSent,
-			Payload:           strings.Repeat("b", int(in.BytesRequestedNextMessage)),
+			Payload:           string(util.RandPrintable(int(in.BytesRequestedNextMessage))),
 		}
 		msgsSent++
 		if err := s.Send(resp); err != nil {
@@ -108,9 +112,7 @@ func (lt *loadTestServer) BidirectionalStreaming(s loadtestpb.LoadTester_Bidirec
 	}
 }
 
-// RunGRPCServers sets up and runs the SSL (not yet added) and non-SSL GRPC servers.
-// TODO(nserrino): PP-3238 Add SSL and gzip support.
-func RunGRPCServers(port string) {
+func runGRPCServerOrDie(port string) {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
 		panic(fmt.Sprintf("failed to listen: %v", err))
@@ -118,8 +120,31 @@ func RunGRPCServers(port string) {
 	var opts []grpc.ServerOption
 	grpcServer := grpc.NewServer(opts...)
 	loadtestpb.RegisterLoadTesterServer(grpcServer, &loadTestServer{})
+	fmt.Println("Serving GRPC")
 	err = grpcServer.Serve(lis)
 	if err != nil {
 		panic(err)
 	}
+}
+
+func runGRPCSSLServerOrDie(tlsConfig *tls.Config, port string) {
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
+	if err != nil {
+		panic(fmt.Sprintf("failed to listen: %v", err))
+	}
+	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)))
+	loadtestpb.RegisterLoadTesterServer(grpcServer, &loadTestServer{})
+	fmt.Println("Serving GRPCS")
+	err = grpcServer.Serve(lis)
+	if err != nil {
+		panic(err)
+	}
+}
+
+// RunGRPCServers sets up and runs the SSL and non-SSL GRPC servers.
+func RunGRPCServers(tlsConfig *tls.Config, port, sslPort string) {
+	if sslPort != "" && tlsConfig != nil {
+		go runGRPCSSLServerOrDie(tlsConfig, sslPort)
+	}
+	runGRPCServerOrDie(port)
 }

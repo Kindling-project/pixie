@@ -735,10 +735,13 @@ func createDialer(lis *bufconn.Listener) func(ctx context.Context, url string) (
 }
 
 func TestGetAgentUpdates(t *testing.T) {
+	viper.Set("jwt_signing_key", "jwtkey")
 	// Set up mock.
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	mockAgtMgr := mock_agent.NewMockManager(ctrl)
+
+	viper.Set("jwt_signing_key", "jwtkey")
 
 	agent1IDStr := "11285cdd-1de9-4ab1-ae6a-0ba08c8c676c"
 	u1, err := uuid.FromString(agent1IDStr)

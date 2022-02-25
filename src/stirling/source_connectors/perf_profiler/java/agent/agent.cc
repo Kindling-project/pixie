@@ -123,7 +123,11 @@ void WriteSymbol(const uint64_t addr, const uint32_t code_size, const bool metho
                                                          .method_unload = method_unload};
 
   g_mtx.lock();
-  LogF("WriteSymbol|0x%016llx|%u|%s|%s|%s", addr, code_size, symbol, fn_sig, class_sig);
+  if (method_unload) {
+    LogF("WriteSymbol|0x%016llx|unload", addr);
+  } else {
+    LogF("WriteSymbol|0x%016llx|%u|%s|%s|%s", addr, code_size, symbol, fn_sig, class_sig);
+  }
   if (g_bin_file_ptr != nullptr) {
     FWriteRetryOnErr(g_bin_file_ptr, &symbol_metadata, sizeof(symbol_metadata));
     FWriteRetryOnErr(g_bin_file_ptr, symbol, symbol_metadata.symbol_size);
@@ -294,19 +298,19 @@ jint OpenLogFiles(const char* options) {
     return JNI_ERR;
   }
 
-  std::string tmp_path_pfx(options);
+  std::string artifacts_path(options);
   g_log_file_ptr = nullptr;
   g_bin_file_ptr = nullptr;
 
   if (kUsingTxtLogFile) {
     // TODO(jps): remove the txt based log file once we finalize java symbolization.
-    g_log_file_ptr = FOpenLogFile(tmp_path_pfx + ".log");
+    g_log_file_ptr = FOpenLogFile(artifacts_path + "/" + px::stirling::java::kTxtSymbolFileName);
     if (g_log_file_ptr == nullptr) {
       return JNI_ERR;
     }
   }
   if (kUsingBinLogFile) {
-    g_bin_file_ptr = FOpenLogFile(tmp_path_pfx + ".bin");
+    g_bin_file_ptr = FOpenLogFile(artifacts_path + "/" + px::stirling::java::kBinSymbolFileName);
     if (g_bin_file_ptr == nullptr) {
       return JNI_ERR;
     }

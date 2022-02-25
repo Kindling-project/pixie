@@ -32,7 +32,7 @@
 
 #include "src/common/base/base.h"
 #include "src/common/perf/elapsed_timer.h"
-#include "src/common/system/system_info.h"
+#include "src/stirling/utils/system_info.h"
 
 #include "src/stirling/bpf_tools/probe_cleaner.h"
 #include "src/stirling/core/data_table.h"
@@ -54,6 +54,11 @@
 #include "src/stirling/source_connectors/socket_tracer/socket_trace_connector.h"
 
 #include "src/stirling/source_connectors/dynamic_tracer/dynamic_tracing/dynamic_tracer.h"
+
+DEFINE_string(
+    stirling_sources, gflags::StringFromEnv("PL_STIRLING_SOURCES", "kProd"),
+    "Choose sources to enable. [kAll|kProd|kMetrics|kTracers|kProfiler] or comma separated list of "
+    "sources (find them the header files of source connector classes).");
 
 namespace px {
 namespace stirling {
@@ -119,6 +124,20 @@ std::vector<std::string_view> GetSourceNamesForGroup(SourceConnectorGroup group)
 }
 // clang-format on
 
+std::vector<std::string_view> GetSourceNamesFromFlag() {
+  std::vector<std::string_view> source_names;
+  if (!FLAGS_stirling_sources.empty()) {
+    std::optional<SourceConnectorGroup> group =
+        magic_enum::enum_cast<SourceConnectorGroup>(FLAGS_stirling_sources);
+    if (group.has_value()) {
+      source_names = GetSourceNamesForGroup(group.value());
+    } else {
+      source_names = absl::StrSplit(FLAGS_stirling_sources, ",", absl::SkipWhitespace());
+    }
+  }
+  return source_names;
+}
+
 StatusOr<std::unique_ptr<SourceRegistry>> CreateSourceRegistry(
     const std::vector<std::string_view>& source_names) {
   auto registry = std::make_unique<SourceRegistry>();
@@ -144,6 +163,10 @@ StatusOr<std::unique_ptr<SourceRegistry>> CreateSourceRegistry(
 std::unique_ptr<SourceRegistry> CreateProdSourceRegistry() {
   return CreateSourceRegistry(GetSourceNamesForGroup(SourceConnectorGroup::kProd))
       .ConsumeValueOrDie();
+}
+
+std::unique_ptr<SourceRegistry> CreateSourceRegistryFromFlag() {
+  return CreateSourceRegistry(GetSourceNamesFromFlag()).ConsumeValueOrDie();
 }
 
 // Holds InfoClassManager and DataTable.
@@ -372,7 +395,7 @@ std::unique_ptr<ConnectorContext> StirlingImpl::GetContext() {
   if (agent_metadata_callback_ != nullptr) {
     return std::unique_ptr<ConnectorContext>(new AgentContext(agent_metadata_callback_()));
   }
-  return std::unique_ptr<ConnectorContext>(new StandaloneContext());
+  return std::unique_ptr<ConnectorContext>(new SystemWideStandaloneContext());
 }
 
 namespace {
@@ -680,9 +703,6 @@ void StirlingImpl::Run() {
 
 namespace {
 
-static constexpr std::chrono::milliseconds kMinSleepDuration{1};
-static constexpr std::chrono::milliseconds kMaxSleepDuration{1000};
-
 // Helper function: Figure out when to wake up next.
 std::chrono::milliseconds TimeUntilNextTick(
     const absl::flat_hash_map<SourceConnector*, SourceOutput> source_output_map) {
@@ -692,6 +712,7 @@ std::chrono::milliseconds TimeUntilNextTick(
 
   // Worst case, wake-up every so often.
   // This is important if there are no subscribed info classes, to avoid sleeping eternally.
+  constexpr std::chrono::milliseconds kMaxSleepDuration{1000};
   auto wakeup_time = now + kMaxSleepDuration;
   for (const auto& [source, output] : source_output_map) {
     wakeup_time = std::min(wakeup_time, source->sampling_freq_mgr().next());
@@ -702,6 +723,7 @@ std::chrono::milliseconds TimeUntilNextTick(
 }
 
 void SleepForDuration(std::chrono::milliseconds sleep_duration) {
+  constexpr std::chrono::milliseconds kMinSleepDuration{1};
   if (sleep_duration > kMinSleepDuration) {
     std::this_thread::sleep_for(sleep_duration);
   }

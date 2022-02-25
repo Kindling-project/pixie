@@ -100,7 +100,7 @@ void DataStream::ProcessBytesToFrames(message_type_t type, TStateType* state) {
   // We appear to be stuck with an an unparsable sequence of events blocking the head.
   bool attempt_sync = IsSyncRequired();
 
-  bool keep_processing = has_new_events_ || attempt_sync;
+  bool keep_processing = has_new_events_ || attempt_sync || conn_closed();
 
   protocols::ParseResult parse_result;
   parse_result.state = ParseState::kNeedsMoreData;
@@ -111,7 +111,7 @@ void DataStream::ProcessBytesToFrames(message_type_t type, TStateType* state) {
 
     // Now parse the raw data.
     parse_result =
-        protocols::ParseFrames(type, data_buffer_, &typed_messages, IsSyncRequired(), state);
+        protocols::ParseFrames(type, &data_buffer_, &typed_messages, IsSyncRequired(), state);
     if (contiguous_bytes != data_buffer_.size()) {
       // We weren't able to submit all bytes, which means we ran into a missing event.
       // We don't expect missing events to arrive in the future, so just cut our losses.
@@ -158,9 +158,6 @@ void DataStream::ProcessBytesToFrames(message_type_t type, TStateType* state) {
     ResetLastProgressTimeToNow();
   }
 
-  // Shrink the data buffer's allocated memory to fit just what is retained.
-  data_buffer_.ShrinkToFit();
-
   last_parse_state_ = parse_result.state;
 
   // has_new_events_ should be false for the next transfer cycle.
@@ -168,8 +165,9 @@ void DataStream::ProcessBytesToFrames(message_type_t type, TStateType* state) {
 }
 
 // PROTOCOL_LIST: Requires update on new protocols.
-template void DataStream::ProcessBytesToFrames<protocols::http::Message, protocols::NoState>(
-    message_type_t type, protocols::NoState* state);
+template void
+DataStream::ProcessBytesToFrames<protocols::http::Message, protocols::http::StateWrapper>(
+    message_type_t type, protocols::http::StateWrapper* state);
 template void DataStream::ProcessBytesToFrames<protocols::mux::Frame, protocols::NoState>(
     message_type_t type, protocols::NoState* state);
 template void

@@ -85,6 +85,9 @@ const std::string_view kReq3 =
     "\r\n"
     "I have a message body";
 
+const std::string_view kReq4 =
+    "GET /test HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
+
 const std::string_view kJSONResp =
     "HTTP/1.1 200 OK\r\n"
     "Content-Type: application/json; charset=utf-8\r\n"
@@ -126,6 +129,15 @@ const std::string_view kResp2 =
     "Content-Length: 3\r\n"
     "\r\n"
     "doe";
+
+const std::string_view kResp4Header =
+    "HTTP/1.0 200 OK\r\n"
+    "Server: BaseHTTP/0.6 Python/3.10.1\r\n"
+    "Date: Wed, 12 Jan 2022 17:37:21 GMT\r\n"
+    "Content-type: application/json\r\n"
+    "\r\n";
+
+const std::string_view kResp4Body = "hello world";
 
 std::vector<std::string> PacketsToRaw(const std::deque<mysql::Packet>& packets) {
   std::vector<std::string> res;
@@ -179,7 +191,7 @@ class SocketTraceConnectorTest : public ::testing::Test {
     source_ = dynamic_cast<SocketTraceConnectorFriend*>(connector_.get());
     ASSERT_NE(nullptr, source_);
 
-    ctx_ = std::make_unique<StandaloneContext>();
+    ctx_ = std::make_unique<SystemWideStandaloneContext>();
 
     // Set the CIDR for HTTP2ServerTest, which would otherwise not output any data,
     // because it would think the server is in the cluster.
@@ -206,7 +218,7 @@ class SocketTraceConnectorTest : public ::testing::Test {
 
   std::unique_ptr<SourceConnector> connector_;
   SocketTraceConnectorFriend* source_ = nullptr;
-  std::unique_ptr<StandaloneContext> ctx_;
+  std::unique_ptr<SystemWideStandaloneContext> ctx_;
   testing::MockClock mock_clock_;
   testing::RealClock real_clock_;
 
@@ -257,6 +269,46 @@ TEST_F(SocketTraceConnectorTest, HTTPBasic) {
   EXPECT_THAT(record_batch, Each(ColWrapperSizeIs(1)));
   EXPECT_THAT(ToStringVector(record_batch[kHTTPReqBodyIdx]), ElementsAre("I have a message body"));
   EXPECT_THAT(ToStringVector(record_batch[kHTTPRespBodyIdx]), ElementsAre("foo"));
+}
+
+TEST_F(SocketTraceConnectorTest, HTTPDelayedRespBody) {
+  testing::EventGenerator event_gen(&real_clock_);
+  struct socket_control_event_t conn = event_gen.InitConn();
+  std::unique_ptr<SocketDataEvent> event0_req = event_gen.InitSendEvent<kProtocolHTTP>(kReq4);
+  std::unique_ptr<SocketDataEvent> event0_resp_header =
+      event_gen.InitRecvEvent<kProtocolHTTP>(kResp4Header);
+  std::unique_ptr<SocketDataEvent> event0_resp_body =
+      event_gen.InitRecvEvent<kProtocolHTTP>(kResp4Body);
+
+  struct socket_control_event_t close_event = event_gen.InitClose();
+
+  EXPECT_NE(0, source_->ConvertToRealTime(0));
+
+  // Registers a new connection.
+  source_->AcceptControlEvent(conn);
+  source_->AcceptDataEvent(std::move(event0_req));
+  source_->AcceptDataEvent(std::move(event0_resp_header));
+
+  // Simulate a large delay between the resp header and body.
+  connector_->TransferData(ctx_.get(), data_tables_->tables());
+  sleep(2);
+  connector_->TransferData(ctx_.get(), data_tables_->tables());
+
+  // Resp body.
+  source_->AcceptDataEvent(std::move(event0_resp_body));
+  connector_->TransferData(ctx_.get(), data_tables_->tables());
+
+  // ConnClose.
+  source_->AcceptControlEvent(close_event);
+  connector_->TransferData(ctx_.get(), data_tables_->tables());
+
+  std::vector<TaggedRecordBatch> tablets = http_table_->ConsumeRecords();
+  ASSERT_FALSE(tablets.empty());
+  RecordBatch record_batch = tablets[0].records;
+
+  EXPECT_THAT(record_batch, Each(ColWrapperSizeIs(1)));
+  EXPECT_THAT(ToStringVector(record_batch[kHTTPReqBodyIdx]), ElementsAre(""));
+  EXPECT_THAT(ToStringVector(record_batch[kHTTPRespBodyIdx]), ElementsAre("hello world"));
 }
 
 TEST_F(SocketTraceConnectorTest, HTTPContentType) {
@@ -760,7 +812,7 @@ TEST_F(SocketTraceConnectorTest, ConnectionCleanupCollecting) {
   }
 
   // Now set retention size to 0 and expect the collecting tracker to be cleaned-up.
-  SET_TEST_FLAG(FLAGS_datastream_buffer_retention_size, 0);
+  PL_SET_FOR_SCOPE(FLAGS_datastream_buffer_retention_size, 0);
   connector_->TransferData(ctx_.get(), data_tables_->tables());
 
   {
@@ -771,7 +823,7 @@ TEST_F(SocketTraceConnectorTest, ConnectionCleanupCollecting) {
 }
 
 TEST_F(SocketTraceConnectorTest, ConnectionCleanupInactiveDead) {
-  FLAGS_stirling_check_proc_for_conn_close = true;
+  PL_SET_FOR_SCOPE(FLAGS_stirling_check_proc_for_conn_close, true);
 
   // Inactive dead connections are determined by checking the /proc filesystem.
   // Here we create a PID that is a valid number, but non-existent on any Linux system.
@@ -808,7 +860,7 @@ TEST_F(SocketTraceConnectorTest, ConnectionCleanupInactiveDead) {
 }
 
 TEST_F(SocketTraceConnectorTest, ConnectionCleanupInactiveAlive) {
-  FLAGS_stirling_check_proc_for_conn_close = true;
+  PL_SET_FOR_SCOPE(FLAGS_stirling_check_proc_for_conn_close, true);
   ConnTracker::set_inactivity_duration(std::chrono::seconds(1));
 
   // Inactive alive connections are determined by checking the /proc filesystem.
@@ -1318,11 +1370,6 @@ TEST_F(SocketTraceConnectorTest, MySQLMultiResultset) {
 
 TEST_F(SocketTraceConnectorTest, CQLQuery) {
   using cass::testutils::CreateCQLEvent;
-  using cass::testutils::kCQLLatencyIdx;
-  using cass::testutils::kCQLReqBodyIdx;
-  using cass::testutils::kCQLReqOpIdx;
-  using cass::testutils::kCQLRespBodyIdx;
-  using cass::testutils::kCQLRespOpIdx;
 
   // QUERY request from client.
   // Contains: SELECT * FROM system.peers
@@ -1369,22 +1416,21 @@ TEST_F(SocketTraceConnectorTest, CQLQuery) {
   RecordBatch record_batch = tablets[0].records;
   EXPECT_THAT(record_batch, Each(ColWrapperSizeIs(1)));
 
-  EXPECT_THAT(ToIntVector<types::Int64Value>(record_batch[kCQLReqOpIdx]),
+  EXPECT_THAT(ToIntVector<types::Int64Value>(record_batch[kCQLReqOp]),
               ElementsAre(static_cast<int64_t>(cass::ReqOp::kQuery)));
-  EXPECT_THAT(ToStringVector(record_batch[kCQLReqBodyIdx]),
-              ElementsAre("SELECT * FROM system.peers"));
+  EXPECT_THAT(ToStringVector(record_batch[kCQLReqBody]), ElementsAre("SELECT * FROM system.peers"));
 
-  EXPECT_THAT(ToIntVector<types::Int64Value>(record_batch[kCQLRespOpIdx]),
+  EXPECT_THAT(ToIntVector<types::Int64Value>(record_batch[kCQLRespOp]),
               ElementsAre(static_cast<int64_t>(cass::RespOp::kResult)));
-  EXPECT_THAT(ToStringVector(record_batch[kCQLRespBodyIdx]), ElementsAre(
-                                                                 R"(Response type = ROWS
+  EXPECT_THAT(ToStringVector(record_batch[kCQLRespBody]), ElementsAre(
+                                                              R"(Response type = ROWS
 Number of columns = 9
 ["peer","data_center","host_id","preferred_ip","rack","release_version","rpc_address","schema_version","tokens"]
 Number of rows = 0)"));
 
   // In test environment, latencies are simply the number of packets in the response.
   // In this case 7 response packets: 1 header + 1 col defs + 1 EOF + 3 rows + 1 EOF.
-  EXPECT_THAT(ToIntVector<types::Int64Value>(record_batch[kCQLLatencyIdx]), ElementsAre(1));
+  EXPECT_THAT(ToIntVector<types::Int64Value>(record_batch[kCQLLatency]), ElementsAre(1));
 }
 
 //-----------------------------------------------------------------------------

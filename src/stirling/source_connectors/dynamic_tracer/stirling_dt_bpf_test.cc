@@ -21,6 +21,8 @@
 #include <thread>
 #include <utility>
 
+#include <absl/functional/bind_front.h>
+
 #include "src/common/base/base.h"
 #include "src/common/exec/subprocess.h"
 #include "src/common/testing/test_utils/container_runner.h"
@@ -47,7 +49,7 @@ class BinaryRunner {
  public:
   void Run(const std::string& binary_path) {
     // Run tracing target.
-    ASSERT_OK(fs::Exists(binary_path));
+    ASSERT_TRUE(fs::Exists(binary_path));
     ASSERT_OK(trace_target_.Start({binary_path}));
   }
 
@@ -64,9 +66,8 @@ class StirlingDynamicTraceBPFTest : public ::testing::Test {
     stirling_ = Stirling::Create(std::move(registry));
 
     // Set function to call on data pushes.
-    stirling_->RegisterDataPushCallback(std::bind(&StirlingDynamicTraceBPFTest::AppendData, this,
-                                                  std::placeholders::_1, std::placeholders::_2,
-                                                  std::placeholders::_3));
+    stirling_->RegisterDataPushCallback(
+        absl::bind_front(&StirlingDynamicTraceBPFTest::AppendData, this));
   }
 
   Status AppendData(uint64_t table_id, types::TabletID tablet_id,
@@ -274,7 +275,7 @@ TEST_F(DynamicTraceAPITest, InvalidReference) {
 class DynamicTraceGolangTest : public StirlingDynamicTraceBPFTest {
  protected:
   const std::string kBinaryPath =
-      BazelBinTestFilePath("src/stirling/obj_tools/testdata/go/test_go_binary");
+      BazelBinTestFilePath("src/stirling/obj_tools/testdata/go/test_go_1_16_binary");
 };
 
 TEST_F(DynamicTraceGolangTest, TraceLatencyOnly) {
