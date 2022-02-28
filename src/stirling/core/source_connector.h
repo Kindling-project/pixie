@@ -128,12 +128,12 @@ class SourceConnector : public NotCopyable {
       :event_counter(prometheus::BuildCounter()
           .Name("nami_events_total").Help("Total bytes in the table")
           .Register(GetMetricsRegistry())),
-//          .Add({{"source_name", source_name}})),
+//          .Add({{"source_name", std::string(source_name)}})),
         poll_buffers_duration(prometheus::BuildHistogram()
           .Name("nami_poll_buffer_duration_seconds")
           .Help("Poll perf buffer duration seconds")
           .Register(GetMetricsRegistry())),
-//          .Add({{"source_name",source_name}}),
+//          .Add({{"source_name",std::string(source_name)}}, prometheus::Histogram::BucketBoundaries{10,20,30,40,50,60,70,80,90,100})),
       source_name_(source_name),
       table_schemas_(table_schemas){}
 
@@ -171,6 +171,8 @@ class SourceConnector : public NotCopyable {
   // metrics
   prometheus::Family<prometheus::Counter>& event_counter;
   prometheus::Family<prometheus::Histogram>& poll_buffers_duration;
+//    prometheus::Counter& event_counter;
+//    prometheus::Histogram& poll_buffers_duration;
 
  private:
   std::atomic<State> state_ = State::kUninitialized;

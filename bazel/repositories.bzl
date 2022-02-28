@@ -161,11 +161,14 @@ def _cc_deps():
     _bazel_repo("com_github_h2o_picohttpparser", build_file = "@px//bazel/external:picohttpparser.BUILD")
     _bazel_repo("com_github_opentelemetry_proto", build_file = "@px//bazel/external:opentelemetry.BUILD")
 
+    # Uncomment these to develop bcc and/or bpftrace locally. Should also comment out the corresponding _git_repo lines.
+    # _local_repo("com_github_iovisor_bcc", build_file = "@px//bazel/external/local_dev:bcc.BUILD")
+    # _local_repo("com_github_iovisor_bpftrace", build_file = "@px//bazel/external/local_dev:bpftrace.BUILD")
     _git_repo("com_github_iovisor_bcc", build_file = "@px//bazel/external:bcc.BUILD")
     _git_repo("com_github_iovisor_bpftrace", build_file = "@px//bazel/external:bpftrace.BUILD")
 
     # TODO(jps): For jattach, consider using a patch and directly pulling from upstream (vs. fork).
-    _git_repo("com_github_apangin_jattach", build_file = "//bazel/external:jattach.BUILD")
+    _git_repo("com_github_apangin_jattach", build_file = "@px//bazel/external:jattach.BUILD")
 
     # Dependencies used in foreign cc rules (e.g. cmake-based builds)
     _include_all_repo("com_github_gperftools_gperftools")

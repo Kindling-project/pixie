@@ -235,48 +235,51 @@ void SocketTraceConnector::InitProtocolTransferSpecs() {
 
 using ProbeType = bpf_tools::BPFProbeAttachType;
 const auto kProbeSpecs = MakeArray<bpf_tools::KProbeSpec>(
-    {{"connect", ProbeType::kEntry, "syscall__probe_entry_connect"},
+    {
+//      {"sockfd_lookup_light", ProbeType::kReturn, "probe_ret_sockfd_lookup_light", false},
+        {"connect", ProbeType::kEntry, "syscall__probe_entry_connect"},
      {"connect", ProbeType::kReturn, "syscall__probe_ret_connect"},
      {"accept", ProbeType::kEntry, "syscall__probe_entry_accept"},
      {"accept", ProbeType::kReturn, "syscall__probe_ret_accept"},
      {"accept4", ProbeType::kEntry, "syscall__probe_entry_accept4"},
      {"accept4", ProbeType::kReturn, "syscall__probe_ret_accept4"},
-     {"write", ProbeType::kEntry, "syscall__probe_entry_write"},
-     {"write", ProbeType::kReturn, "syscall__probe_ret_write"},
-     {"writev", ProbeType::kEntry, "syscall__probe_entry_writev"},
-     {"writev", ProbeType::kReturn, "syscall__probe_ret_writev"},
-     {"send", ProbeType::kEntry, "syscall__probe_entry_send"},
-     {"send", ProbeType::kReturn, "syscall__probe_ret_send"},
-     {"sendto", ProbeType::kEntry, "syscall__probe_entry_sendto"},
-     {"sendto", ProbeType::kReturn, "syscall__probe_ret_sendto"},
-     {"sendmsg", ProbeType::kEntry, "syscall__probe_entry_sendmsg"},
-     {"sendmsg", ProbeType::kReturn, "syscall__probe_ret_sendmsg"},
-     {"sendmmsg", ProbeType::kEntry, "syscall__probe_entry_sendmmsg"},
-     {"sendmmsg", ProbeType::kReturn, "syscall__probe_ret_sendmmsg"},
-     {"sendfile", ProbeType::kEntry, "syscall__probe_entry_sendfile"},
-     {"sendfile", ProbeType::kReturn, "syscall__probe_ret_sendfile"},
-     {"sendfile64", ProbeType::kEntry, "syscall__probe_entry_sendfile"},
-     {"sendfile64", ProbeType::kReturn, "syscall__probe_ret_sendfile"},
-     {"read", ProbeType::kEntry, "syscall__probe_entry_read"},
-     {"read", ProbeType::kReturn, "syscall__probe_ret_read"},
-     {"readv", ProbeType::kEntry, "syscall__probe_entry_readv"},
-     {"readv", ProbeType::kReturn, "syscall__probe_ret_readv"},
-     {"recv", ProbeType::kEntry, "syscall__probe_entry_recv"},
-     {"recv", ProbeType::kReturn, "syscall__probe_ret_recv"},
-     {"recvfrom", ProbeType::kEntry, "syscall__probe_entry_recvfrom"},
-     {"recvfrom", ProbeType::kReturn, "syscall__probe_ret_recvfrom"},
-     {"recvmsg", ProbeType::kEntry, "syscall__probe_entry_recvmsg"},
-     {"recvmsg", ProbeType::kReturn, "syscall__probe_ret_recvmsg"},
-     {"recvmmsg", ProbeType::kEntry, "syscall__probe_entry_recvmmsg"},
-     {"recvmmsg", ProbeType::kReturn, "syscall__probe_ret_recvmmsg"},
+//     {"write", ProbeType::kEntry, "syscall__probe_entry_write"},
+//     {"write", ProbeType::kReturn, "syscall__probe_ret_write"},
+//     {"writev", ProbeType::kEntry, "syscall__probe_entry_writev"},
+//     {"writev", ProbeType::kReturn, "syscall__probe_ret_writev"},
+//     {"send", ProbeType::kEntry, "syscall__probe_entry_send"},
+//     {"send", ProbeType::kReturn, "syscall__probe_ret_send"},
+//     {"sendto", ProbeType::kEntry, "syscall__probe_entry_sendto"},
+//     {"sendto", ProbeType::kReturn, "syscall__probe_ret_sendto"},
+//     {"sendmsg", ProbeType::kEntry, "syscall__probe_entry_sendmsg"},
+//     {"sendmsg", ProbeType::kReturn, "syscall__probe_ret_sendmsg"},
+//     {"sendmmsg", ProbeType::kEntry, "syscall__probe_entry_sendmmsg"},
+//     {"sendmmsg", ProbeType::kReturn, "syscall__probe_ret_sendmmsg"},
+//     {"sendfile", ProbeType::kEntry, "syscall__probe_entry_sendfile"},
+//     {"sendfile", ProbeType::kReturn, "syscall__probe_ret_sendfile"},
+//     {"sendfile64", ProbeType::kEntry, "syscall__probe_entry_sendfile"},
+//     {"sendfile64", ProbeType::kReturn, "syscall__probe_ret_sendfile"},
+//     {"read", ProbeType::kEntry, "syscall__probe_entry_read"},
+//     {"read", ProbeType::kReturn, "syscall__probe_ret_read"},
+//     {"readv", ProbeType::kEntry, "syscall__probe_entry_readv"},
+//     {"readv", ProbeType::kReturn, "syscall__probe_ret_readv"},
+//     {"recv", ProbeType::kEntry, "syscall__probe_entry_recv"},
+//     {"recv", ProbeType::kReturn, "syscall__probe_ret_recv"},
+//     {"recvfrom", ProbeType::kEntry, "syscall__probe_entry_recvfrom"},
+//     {"recvfrom", ProbeType::kReturn, "syscall__probe_ret_recvfrom"},
+//     {"recvmsg", ProbeType::kEntry, "syscall__probe_entry_recvmsg"},
+//     {"recvmsg", ProbeType::kReturn, "syscall__probe_ret_recvmsg"},
+//     {"recvmmsg", ProbeType::kEntry, "syscall__probe_entry_recvmmsg"},
+//     {"recvmmsg", ProbeType::kReturn, "syscall__probe_ret_recvmmsg"},
      {"close", ProbeType::kEntry, "syscall__probe_entry_close"},
      {"close", ProbeType::kReturn, "syscall__probe_ret_close"},
      {"mmap", ProbeType::kEntry, "syscall__probe_entry_mmap"},
      {"sock_alloc", ProbeType::kReturn, "probe_ret_sock_alloc", /*is_syscall*/ false},
-     {"security_socket_sendmsg", ProbeType::kEntry, "probe_entry_security_socket_sendmsg",
-      /*is_syscall*/ false},
-     {"security_socket_recvmsg", ProbeType::kEntry, "probe_entry_security_socket_recvmsg",
-      /*is_syscall*/ false}});
+//     {"security_socket_sendmsg", ProbeType::kEntry, "probe_entry_security_socket_sendmsg",
+//      /*is_syscall*/ false},
+//     {"security_socket_recvmsg", ProbeType::kEntry, "probe_entry_security_socket_recvmsg",
+//      /*is_syscall*/ false}
+    });
 
 using bpf_tools::PerfBufferSizeCategory;
 
@@ -545,7 +548,9 @@ void SocketTraceConnector::UpdateCommonState(ConnectorContext* ctx) {
   int64_t start_ts = CurrentTimeNS();
   PollPerfBuffers();
   int64_t end_ts = CurrentTimeNS();
-  this->poll_buffers_duration.Add({{"stage","update_common_state"},{"type","total"}}, prometheus::Histogram::BucketBoundaries{10,20,30,40,50,60,70,80,90,100}).Observe((end_ts * 1.0 - start_ts * 1.0) / 1000000);
+  this->poll_buffers_duration.Add({{"stage","update_common_state"},{"type","total"}},
+                                  prometheus::Histogram::BucketBoundaries{10,20,30,40,50,60,70,80,90,100})
+                                  .Observe((end_ts * 1.0 - start_ts * 1.0) / 1000000);
 
   // Set-up current state for connection inference purposes.
   if (socket_info_mgr_ != nullptr) {
@@ -716,7 +721,7 @@ void SocketTraceConnector::HandleDataEvent(void* cb_cookie, void* data, int data
   if (filler_event_ptr) {
     connector->AcceptDataEvent(std::move(filler_event_ptr));
   }
-  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
+//  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", magic_enum::enum_name(data_event_ptr.get()->attr.protocol)},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
   connector->AcceptDataEvent(std::move(data_event_ptr));
 }
 
@@ -818,7 +823,8 @@ void SocketTraceConnector::HandleHTTP2Event(void* cb_cookie, void* data, int /*d
 void SocketTraceConnector::HandleHTTP2EventLoss(void* cb_cookie, uint64_t lost) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
   static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossHTTP2Event, lost);
-  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
+  auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
+  connector->event_counter.Add({{"source_name", "socket_trace_connector"},{"protocol", "http2"},{"event_type","event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
 }
 
 //-----------------------------------------------------------------------------
@@ -914,6 +920,8 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   // But std::move is not allowed because we re-use conn object.
   r.Append<r.ColIndex("remote_addr")>(conn_tracker.remote_endpoint().AddrStr());
   r.Append<r.ColIndex("remote_port")>(conn_tracker.remote_endpoint().port());
+  r.Append<r.ColIndex("source_addr")>(conn_tracker.source_endpoint().AddrStr());
+  r.Append<r.ColIndex("source_port")>(conn_tracker.source_endpoint().port());
   r.Append<r.ColIndex("trace_role")>(conn_tracker.role());
   r.Append<r.ColIndex("major_version")>(1);
   r.Append<r.ColIndex("minor_version")>(resp_message.minor_version);
@@ -969,6 +977,9 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
     content_type = HTTPContentType::kGRPC;
   }
 
+  VLOG(1) << absl::Substitute("[grpc][http2] before record:$0, source_addr:$1, source_port:$2, remote_addr:$3, remote_port:$4",
+                                   record.ToString(), conn_tracker.source_endpoint().AddrStr(), conn_tracker.source_endpoint().port(), conn_tracker.remote_endpoint().AddrStr(), conn_tracker.remote_endpoint().port());
+
   ParseReqRespBody(&record, DataTable::kTruncatedMsg, kMaxPBStringLen);
 
   DataTable::RecordBuilder<&kHTTPTable> r(data_table, resp_stream->timestamp_ns);
@@ -976,6 +987,8 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   r.Append<r.ColIndex("upid")>(upid.value());
   r.Append<r.ColIndex("remote_addr")>(conn_tracker.remote_endpoint().AddrStr());
   r.Append<r.ColIndex("remote_port")>(conn_tracker.remote_endpoint().port());
+  r.Append<r.ColIndex("source_addr")>(conn_tracker.source_endpoint().AddrStr());
+  r.Append<r.ColIndex("source_port")>(conn_tracker.source_endpoint().port());
   r.Append<r.ColIndex("trace_role")>(conn_tracker.role());
   r.Append<r.ColIndex("major_version")>(2);
   // HTTP2 does not define minor version.
@@ -999,6 +1012,7 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   int64_t latency_ns = CalculateLatency(req_stream->timestamp_ns, resp_stream->timestamp_ns);
   r.Append<r.ColIndex("latency")>(latency_ns);
   // TODO(yzhao): Remove once http2::Record::bpf_timestamp_ns is removed.
+  // TODO @qianlu.kk
   LOG_IF_EVERY_N(WARNING, latency_ns < 0, 100)
       << absl::Substitute("Negative latency found in HTTP2 records, record=$0", record.ToString());
 #ifndef NDEBUG
