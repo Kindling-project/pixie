@@ -745,42 +745,6 @@ void SocketTraceConnector::HandleHTTP2Event(void* cb_cookie, void* data, int /*d
 
   auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
 
-<<<<<<< HEAD
-  auto event = std::make_unique<HTTP2HeaderEvent>(data);
-
-  VLOG(3) << absl::Substitute(
-      "t=$0 pid=$1 type=$2 fd=$3 tsid=$4 stream_id=$5 end_stream=$6 name=$7 value=$8",
-      event->attr.timestamp_ns, event->attr.conn_id.upid.pid,
-      magic_enum::enum_name(event->attr.type), event->attr.conn_id.fd, event->attr.conn_id.tsid,
-      event->attr.stream_id, event->attr.end_stream, event->name, event->value);
-  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","header_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
-  connector->AcceptHTTP2Header(std::move(event));
-}
-
-void SocketTraceConnector::HandleHTTP2HeaderEventLoss(void* cb_cookie, uint64_t lost) {
-  DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
-  auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
-  connector->event_counter.Add({{"source_name", "socket_trace_connector"},{"protocol", "http2"},{"event_type","header_event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
-  static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossGoGRPCHeaderEvent,
-                                                                  lost);
-}
-
-void SocketTraceConnector::HandleHTTP2Data(void* cb_cookie, void* data, int /*data_size*/) {
-  DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
-
-  auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
-  // Directly access data through a go_grpc_data_event_t pointer results in mis-aligned access.
-  // go_grpc_data_event_t is 8-bytes aligned, data is 4-bytes.
-  auto event = std::make_unique<HTTP2DataEvent>(data);
-
-  VLOG(3) << absl::Substitute(
-      "t=$0 pid=$1 type=$2 fd=$3 tsid=$4 stream_id=$5 end_stream=$6 data=$7",
-      event->attr.timestamp_ns, event->attr.conn_id.upid.pid,
-      magic_enum::enum_name(event->attr.type), event->attr.conn_id.fd, event->attr.conn_id.tsid,
-      event->attr.stream_id, event->attr.end_stream, event->payload);
-  connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
-  connector->AcceptHTTP2Data(std::move(event));
-=======
   // Note: Directly accessing data through the data pointer can result in mis-aligned accesses.
   // This is because the perf buffer data starts at an offset of 4 bytes.
   // Accessing the event_type should be safe as long as it is 4-byte data type.
@@ -798,6 +762,7 @@ void SocketTraceConnector::HandleHTTP2Data(void* cb_cookie, void* data, int /*da
           event->attr.conn_id.tsid, event->attr.stream_id, event->attr.end_stream, event->name,
           event->value);
       connector->AcceptHTTP2Header(std::move(event));
+      connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","header_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
     } break;
     case kDataFrameEventRead:
     case kDataFrameEventWrite: {
@@ -809,23 +774,19 @@ void SocketTraceConnector::HandleHTTP2Data(void* cb_cookie, void* data, int /*da
           magic_enum::enum_name(event->attr.event_type), event->attr.conn_id.fd,
           event->attr.conn_id.tsid, event->attr.stream_id, event->attr.end_stream, event->payload);
       connector->AcceptHTTP2Data(std::move(event));
+      connector->event_counter.Add({{"source_name", connector->name()},{"protocol", "http2"},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","receive"}}).Increment();
     } break;
     default:
       LOG(DFATAL) << absl::Substitute("Unexpected event_type $0",
                                       magic_enum::enum_name(event_type));
   }
->>>>>>> upstream/main
 }
 
 void SocketTraceConnector::HandleHTTP2EventLoss(void* cb_cookie, uint64_t lost) {
   DCHECK(cb_cookie != nullptr) << "Perf buffer callback not set-up properly. Missing cb_cookie.";
-<<<<<<< HEAD
   auto* connector = static_cast<SocketTraceConnector*>(cb_cookie);
-  static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossHTTP2Data, lost);
-  connector->event_counter.Add({{"source_name", "socket_trace_connector"},{"protocol", "http2"},{"event_type","data_event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
-=======
+  connector->event_counter.Add({{"source_name", "socket_trace_connector"},{"protocol", "http2"},{"event_type","event"},{"stage","poll_perf_buffer"},{"status","loss"}}).Increment();
   static_cast<SocketTraceConnector*>(cb_cookie)->stats_.Increment(StatKey::kLossHTTP2Event, lost);
->>>>>>> upstream/main
 }
 
 //-----------------------------------------------------------------------------
