@@ -75,7 +75,7 @@ std::unique_ptr<SourceRegistry> CreateSourceRegistryFromFlag();
  * Returns a source registry registered with the specified sources.
  */
 StatusOr<std::unique_ptr<SourceRegistry>> CreateSourceRegistry(
-        const absl::flat_hash_set<std::string_view>& source_names);
+        const std::vector<std::string_view>& source_names);
 /**
  * Returns a source registry registered with all prod sources.
  */
