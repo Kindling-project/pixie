@@ -225,12 +225,13 @@ void SocketTraceConnector::InitProtocolTransferSpecs() {
 
 using ProbeType = bpf_tools::BPFProbeAttachType;
 const auto kProbeSpecs = MakeArray<bpf_tools::KProbeSpec>(
-    {{"connect", ProbeType::kEntry, "syscall__probe_entry_connect"},
-     {"connect", ProbeType::kReturn, "syscall__probe_ret_connect"},
-     {"accept", ProbeType::kEntry, "syscall__probe_entry_accept"},
-     {"accept", ProbeType::kReturn, "syscall__probe_ret_accept"},
-     {"accept4", ProbeType::kEntry, "syscall__probe_entry_accept4"},
-     {"accept4", ProbeType::kReturn, "syscall__probe_ret_accept4"},
+    {
+//        {"connect", ProbeType::kEntry, "syscall__probe_entry_connect"},
+//     {"connect", ProbeType::kReturn, "syscall__probe_ret_connect"},
+//     {"accept", ProbeType::kEntry, "syscall__probe_entry_accept"},
+//     {"accept", ProbeType::kReturn, "syscall__probe_ret_accept"},
+//     {"accept4", ProbeType::kEntry, "syscall__probe_entry_accept4"},
+//     {"accept4", ProbeType::kReturn, "syscall__probe_ret_accept4"},
 //     {"write", ProbeType::kEntry, "syscall__probe_entry_write"},
 //     {"write", ProbeType::kReturn, "syscall__probe_ret_write"},
 //     {"writev", ProbeType::kEntry, "syscall__probe_entry_writev"},
