@@ -305,6 +305,7 @@ static __inline void read_source_sockaddr_kernel(struct conn_info_t* conn_info,
 //  sport = ((struct inet_sock *)sk)->inet_sport;
 
   bpf_probe_read_kernel(&family, sizeof(family), &sk_common->skc_family);
+  conn_info->source_addr.sa.sa_family = family;
 
   if (family == AF_INET) {
     conn_info->source_addr.in4.sin_port = sport;
