@@ -181,6 +181,7 @@ static __inline struct conn_stats_event_t* fill_conn_stats_event(
 
   event->conn_id = conn_info->conn_id;
   event->addr = conn_info->addr;
+  event->source_addr = conn_info->source_addr;
   event->role = conn_info->role;
   event->wr_bytes = conn_info->wr_bytes;
   event->rd_bytes = conn_info->rd_bytes;
