@@ -292,6 +292,33 @@ static __inline void update_traffic_class(struct conn_info_t* conn_info,
   }
 }
 
+static __inline void read_source_sockaddr_kernel(struct conn_info_t* conn_info,
+                                                 const struct socket* socket) {
+  struct sock* sk = NULL;
+  bpf_probe_read_kernel(&sk, sizeof(sk), &socket->sk);
+
+  struct sock_common* sk_common = &sk->__sk_common;
+  uint16_t family = -1;
+  // source port
+  uint16_t sport = -1;
+  bpf_probe_read_kernel(&sport, sizeof(sport), &((struct inet_sock *)sk)->inet_sport);
+//  sport = ((struct inet_sock *)sk)->inet_sport;
+
+  bpf_probe_read_kernel(&family, sizeof(family), &sk_common->skc_family);
+
+  if (family == AF_INET) {
+    conn_info->source_addr.in4.sin_port = sport;
+
+    uint32_t* addr = &conn_info->source_addr.in4.sin_addr.s_addr;
+    bpf_probe_read_kernel(addr, sizeof(*addr), &sk_common->skc_rcv_saddr);
+  } else if (family == AF_INET6) {
+    conn_info->source_addr.in6.sin6_port = sport;
+
+    struct in6_addr* addr = &conn_info->source_addr.in6.sin6_addr;
+    bpf_probe_read_kernel(addr, sizeof(*addr), &sk_common->skc_v6_rcv_saddr);
+  }
+}
+
 /***********************************************************
  * Perf submit functions
  ***********************************************************/
@@ -334,6 +361,11 @@ static __inline void submit_new_conn(struct pt_regs* ctx, uint32_t tgid, int32_t
   } else if (socket != NULL) {
     read_sockaddr_kernel(&conn_info, socket);
   }
+  // fill source ip/port
+  if (socket != NULL) {
+    read_source_sockaddr_kernel(&conn_info, socket);
+  }
+
   conn_info.role = role;
 
   uint64_t tgid_fd = gen_tgid_fd(tgid, fd);
@@ -352,6 +384,7 @@ static __inline void submit_new_conn(struct pt_regs* ctx, uint32_t tgid, int32_t
   control_event.conn_id = conn_info.conn_id;
   control_event.open.addr = conn_info.addr;
   control_event.open.role = conn_info.role;
+  control_event.open.source_addr = conn_info.source_addr;
 
   socket_control_events.perf_submit(ctx, &control_event, sizeof(struct socket_control_event_t));
 }

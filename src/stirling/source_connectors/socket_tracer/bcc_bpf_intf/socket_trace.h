@@ -49,6 +49,7 @@ struct conn_info_t {
 
   // IP address of the remote endpoint.
   union sockaddr_t addr;
+  union sockaddr_t source_addr;
 
   // The protocol of traffic on the connection (HTTP, MySQL, etc.).
   enum traffic_protocol_t protocol;
@@ -91,6 +92,7 @@ struct conn_info_t {
 // See conn_info_t for descriptions of the members.
 struct conn_event_t {
   union sockaddr_t addr;
+  union sockaddr_t source_addr;
   enum endpoint_role_t role;
 };
 
@@ -217,6 +219,8 @@ struct conn_stats_event_t {
 
   // IP address of the remote endpoint.
   union sockaddr_t addr;
+
+  union sockaddr_t source_addr;
 
   // The server-client role.
   enum endpoint_role_t role;

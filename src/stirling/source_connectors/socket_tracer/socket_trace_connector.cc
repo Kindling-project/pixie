@@ -226,12 +226,12 @@ void SocketTraceConnector::InitProtocolTransferSpecs() {
 using ProbeType = bpf_tools::BPFProbeAttachType;
 const auto kProbeSpecs = MakeArray<bpf_tools::KProbeSpec>(
     {
-//        {"connect", ProbeType::kEntry, "syscall__probe_entry_connect"},
-//     {"connect", ProbeType::kReturn, "syscall__probe_ret_connect"},
-//     {"accept", ProbeType::kEntry, "syscall__probe_entry_accept"},
-//     {"accept", ProbeType::kReturn, "syscall__probe_ret_accept"},
-//     {"accept4", ProbeType::kEntry, "syscall__probe_entry_accept4"},
-//     {"accept4", ProbeType::kReturn, "syscall__probe_ret_accept4"},
+        {"connect", ProbeType::kEntry, "syscall__probe_entry_connect"},
+     {"connect", ProbeType::kReturn, "syscall__probe_ret_connect"},
+     {"accept", ProbeType::kEntry, "syscall__probe_entry_accept"},
+     {"accept", ProbeType::kReturn, "syscall__probe_ret_accept"},
+     {"accept4", ProbeType::kEntry, "syscall__probe_entry_accept4"},
+     {"accept4", ProbeType::kReturn, "syscall__probe_ret_accept4"},
 //     {"write", ProbeType::kEntry, "syscall__probe_entry_write"},
 //     {"write", ProbeType::kReturn, "syscall__probe_ret_write"},
 //     {"writev", ProbeType::kEntry, "syscall__probe_entry_writev"},
@@ -262,8 +262,8 @@ const auto kProbeSpecs = MakeArray<bpf_tools::KProbeSpec>(
 //     {"recvmmsg", ProbeType::kReturn, "syscall__probe_ret_recvmmsg"},
      {"close", ProbeType::kEntry, "syscall__probe_entry_close"},
      {"close", ProbeType::kReturn, "syscall__probe_ret_close"},
-//     {"mmap", ProbeType::kEntry, "syscall__probe_entry_mmap"},
-//     {"sock_alloc", ProbeType::kReturn, "probe_ret_sock_alloc", /*is_syscall*/ false},
+     {"mmap", ProbeType::kEntry, "syscall__probe_entry_mmap"},
+     {"sock_alloc", ProbeType::kReturn, "probe_ret_sock_alloc", /*is_syscall*/ false},
 //     {"security_socket_sendmsg", ProbeType::kEntry, "probe_entry_security_socket_sendmsg",
 //      /*is_syscall*/ false},
 //     {"security_socket_recvmsg", ProbeType::kEntry, "probe_entry_security_socket_recvmsg",
@@ -879,6 +879,8 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   // But std::move is not allowed because we re-use conn object.
   r.Append<r.ColIndex("remote_addr")>(conn_tracker.remote_endpoint().AddrStr());
   r.Append<r.ColIndex("remote_port")>(conn_tracker.remote_endpoint().port());
+  r.Append<r.ColIndex("source_addr")>(conn_tracker.source_endpoint().AddrStr());
+  r.Append<r.ColIndex("source_port")>(conn_tracker.source_endpoint().port());
   r.Append<r.ColIndex("trace_role")>(conn_tracker.role());
   r.Append<r.ColIndex("major_version")>(1);
   r.Append<r.ColIndex("minor_version")>(resp_message.minor_version);
@@ -941,6 +943,8 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   r.Append<r.ColIndex("upid")>(upid.value());
   r.Append<r.ColIndex("remote_addr")>(conn_tracker.remote_endpoint().AddrStr());
   r.Append<r.ColIndex("remote_port")>(conn_tracker.remote_endpoint().port());
+  r.Append<r.ColIndex("source_addr")>(conn_tracker.source_endpoint().AddrStr());
+  r.Append<r.ColIndex("source_port")>(conn_tracker.source_endpoint().port());
   r.Append<r.ColIndex("trace_role")>(conn_tracker.role());
   r.Append<r.ColIndex("major_version")>(2);
   // HTTP2 does not define minor version.
