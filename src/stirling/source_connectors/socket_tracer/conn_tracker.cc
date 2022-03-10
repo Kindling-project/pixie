@@ -100,12 +100,13 @@ void ConnTracker::AddConnOpenEvent(const conn_event_t& conn_event, uint64_t time
   open_info_.timestamp_ns = timestamp_ns;
 
   SetRemoteAddr(conn_event.addr, "Inferred from conn_open.");
+  SetSourceAddr(conn_event.source_addr, "Inferred from conn_open.");
 
   SetRole(conn_event.role, "Inferred from conn_open.");
 
-  CONN_TRACE(1) << absl::Substitute("conn_open af=$0 addr=$1",
+  CONN_TRACE(1) << absl::Substitute("conn_open af=$0 addr=$1 source_addr=$2",
                                     magic_enum::enum_name(open_info_.remote_addr.family),
-                                    open_info_.remote_addr.AddrStr());
+                                    open_info_.remote_addr.AddrStr(), open_info_.source_addr.AddrStr());
 }
 
 void ConnTracker::AddConnCloseEvent(const close_event_t& close_event, uint64_t timestamp_ns) {
@@ -178,6 +179,7 @@ void ConnTracker::AddDataEvent(std::unique_ptr<SocketDataEvent> event) {
 void ConnTracker::AddConnStats(const conn_stats_event_t& event) {
   SetRole(event.role, "inferred from conn_stats event");
   SetRemoteAddr(event.addr, "conn_stats event");
+  SetSourceAddr(event.source_addr, "conn_stats event");
   UpdateTimestamps(event.timestamp_ns);
 
   CONN_TRACE(1) << absl::Substitute("ConnStats timestamp=$0 wr=$1 rd=$2 close=$3",
@@ -455,6 +457,17 @@ void ConnTracker::SetRemoteAddr(const union sockaddr_t addr, std::string_view re
     }
     CONN_TRACE(1) << absl::Substitute("RemoteAddr updated $0, reason=[$1]",
                                       open_info_.remote_addr.AddrStr(), reason);
+  }
+}
+
+void ConnTracker::SetSourceAddr(const union sockaddr_t addr, std::string_view reason) {
+  if (open_info_.source_addr.family == SockAddrFamily::kUnspecified) {
+    PopulateSockAddr(&addr.sa, &open_info_.source_addr);
+    if (addr.sa.sa_family == PX_AF_UNKNOWN) {
+        open_info_.source_addr.family = SockAddrFamily::kUnspecified;
+    }
+    CONN_TRACE(1) << absl::Substitute("SourceAddr updated $0, reason=[$1]",
+                                      open_info_.source_addr.AddrStr(), reason);
   }
 }
 
