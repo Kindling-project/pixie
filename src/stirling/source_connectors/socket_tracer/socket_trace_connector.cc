@@ -936,8 +936,7 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
     content_type = HTTPContentType::kGRPC;
   }
 
-  LOG_IF_EVERY_N(WARNING, true, 100)
-    << absl::Substitute("[grpc][http2] before record.");
+  LOG(WARNING) << absl::Substitute("[grpc][http2] before record: $0", record.ToString());
 
   ParseReqRespBody(&record, DataTable::kTruncatedMsg, kMaxPBStringLen);
 
@@ -972,7 +971,7 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   r.Append<r.ColIndex("latency")>(latency_ns);
   // TODO(yzhao): Remove once http2::Record::bpf_timestamp_ns is removed.
   // TODO @qianlu.kk
-  LOG_IF_EVERY_N(WARNING, latency_ns >= 0, 100)
+  LOG_IF_EVERY_N(WARNING, latency_ns < 0, 100)
       << absl::Substitute("Negative latency found in HTTP2 records, record=$0", record.ToString());
 #ifndef NDEBUG
   r.Append<r.ColIndex("px_info_")>(ToString(conn_tracker.conn_id()));
